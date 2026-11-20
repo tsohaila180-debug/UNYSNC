@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <title>UniSync</title>
+  <meta name="description" content="UniSync — Arab Open University Academic Workspace" />
+
+  <!-- iOS Safari PWA Configuration -->
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="UniSync" />
+  <meta name="format-detection" content="telephone=no" />
+  <link rel="apple-touch-icon" sizes="180x180" href="./icons/apple-touch-icon.png" />
+
+  <!-- Android Chrome & Desktop PWA Configuration -->
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="application-name" content="UniSync" />
+  <meta id="theme-color-meta" name="theme-color" content="#1F6E5A" />
+  <link rel="icon" type="image/png" sizes="32x32" href="./icons/favicon-32.png" />
+  <link rel="manifest" href="./manifest.json" />
+
+  <link rel="stylesheet" href="./pwa-styles.css" />
+</head>
+<body class="role-student theme-light">
+  <div id="app" class="app-shell">
+    <noscript>
+      <div style="padding:24px;font-family:system-ui,sans-serif;text-align:center;">
+        <h1>UniSync</h1>
+        <p>JavaScript is required to run UniSync.</p>
+      </div>
+    </noscript>
+  </div>
+
+  <script src="./pwa-data.js"></script>
+  <script src="./pwa-app.js"></script>
+</body>
+</html>
