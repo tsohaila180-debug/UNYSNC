@@ -17,7 +17,7 @@ import kotlinx.coroutines.flow.map
 private val Context.uniSyncDataStore: DataStore<Preferences> by preferencesDataStore(name = "unisync_prefs")
 
 data class LocalUserSettings(
-    val languageCode: String = "en",
+    val languageCode: String = "ar",
     val darkMode: Boolean = false,
     val fontScale: FontScaleOption = FontScaleOption.MEDIUM,
     val role: UserRole = UserRole.STUDENT,
@@ -48,7 +48,7 @@ class PreferencesRepository(private val context: Context) {
 
     val settingsFlow: Flow<LocalUserSettings> = context.uniSyncDataStore.data.map { prefs ->
         LocalUserSettings(
-            languageCode = prefs[Keys.LANGUAGE] ?: "en",
+            languageCode = prefs[Keys.LANGUAGE] ?: "ar",
             darkMode = prefs[Keys.DARK_MODE] ?: false,
             fontScale = FontScaleOption.fromKey(prefs[Keys.FONT_SCALE]),
             role = UserRole.fromKey(prefs[Keys.ROLE]),

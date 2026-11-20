@@ -9,8 +9,8 @@
   "orientation": "portrait-primary",
   "background_color": "#592669",
   "theme_color": "#592669",
-  "dir": "auto",
-  "lang": "en",
+  "dir": "rtl",
+  "lang": "ar",
   "categories": ["education", "productivity"],
   "icons": [
     {

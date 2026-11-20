@@ -1,6 +1,7 @@
 (function () {
   const D = window.UNISYNC_DATA;
   const STORAGE_KEY = "unisync_pwa_state_v1";
+  const LANG_STORAGE_KEY = "unisync_lang";
 
   const ICON_SVG_BADGE = `<img src="./icons/apple-touch-icon.png" alt="UniSync" class="app-badge-icon" />`;
   const ICON_SVG_BADGE_LG = `<img src="./icons/apple-touch-icon.png" alt="UniSync" class="app-badge-icon lg" />`;
@@ -23,13 +24,37 @@
     }
   }
 
+  function resolveInitialLanguage(saved) {
+    try {
+      const urlLang = new URLSearchParams(window.location.search).get("lang");
+      if (urlLang && D.LANGUAGES.some((l) => l.code === urlLang)) return urlLang;
+    } catch (_) {}
+    try {
+      const storedLang = localStorage.getItem(LANG_STORAGE_KEY);
+      if (storedLang && D.LANGUAGES.some((l) => l.code === storedLang)) return storedLang;
+    } catch (_) {}
+    if (saved.languageCode && D.LANGUAGES.some((l) => l.code === saved.languageCode)) {
+      return saved.languageCode;
+    }
+    return "ar";
+  }
+
+  function hydrateWithDefaults(savedList, defaultList) {
+    if (!Array.isArray(savedList) || !savedList.length) return defaultList.slice();
+    const byId = {};
+    defaultList.forEach((d) => { byId[d.id] = d; });
+    return savedList.map((item) => (byId[item.id] ? Object.assign({}, byId[item.id], item) : item));
+  }
+
   const saved = loadPersisted();
+  const initialLang = resolveInitialLanguage(saved);
+  const initialRole = saved.role || "student";
 
   const state = {
-    session: saved.session || null, // { mode: 'demo'|'academic'|'microsoft', name, email }
-    role: saved.role || "student",
+    session: saved.session || null,
+    role: initialRole,
     darkMode: Boolean(saved.darkMode),
-    languageCode: saved.languageCode || "en",
+    languageCode: initialLang,
     fontScale: Number(saved.fontScale || 1),
     aouBranch: saved.aouBranch || D.SAUDI_BRANCHES[0],
     selectedMajorId: saved.selectedMajorId || "cs",
@@ -45,7 +70,7 @@
     drawerOpen: false,
     showRepliedReviewed: false,
 
-    emails: D.getSampleEmails(saved.role || "student"),
+    emails: D.getSampleEmails(initialRole),
     priorityFilter: null,
     sortByPriority: true,
     selectedEmailId: null,
@@ -57,7 +82,7 @@
     answeredQuestionIds: saved.answeredQuestionIds || [],
     answeredQuestionReplies: saved.answeredQuestionReplies || {},
 
-    calendarEvents: saved.calendarEvents || D.getDefaultCalendarEvents(saved.role || "student"),
+    calendarEvents: hydrateWithDefaults(saved.calendarEvents, D.getDefaultCalendarEvents(initialRole)),
     triggeredEventIds: [],
     ringingEvent: null,
 
@@ -68,13 +93,12 @@
     selectedCourseCode: null,
 
     manualNotes: saved.manualNotes || [],
-    facultyMaterials: saved.facultyMaterials || D.DEFAULT_FACULTY_MATERIALS.slice(),
-    chatMessages: saved.chatMessages || D.DEFAULT_CHAT_MESSAGES.slice(),
+    facultyMaterials: hydrateWithDefaults(saved.facultyMaterials, D.DEFAULT_FACULTY_MATERIALS),
+    chatMessages: hydrateWithDefaults(saved.chatMessages, D.DEFAULT_CHAT_MESSAGES),
     chatTab: "direct",
     chatAttachmentDataUrl: "",
 
     studyMessages: [],
-    freshmanAnswer: "",
     freshmanSearch: "",
 
     voiceNotes: saved.voiceNotes || [],
@@ -87,7 +111,6 @@
     pomodoroIsBreak: false,
     milestoneAward: null,
 
-    // Modals & transient UI
     unifiedReplyClusterId: null,
     unifiedReplyText: "",
     showComposeModal: false,
@@ -105,8 +128,19 @@
     return m ? Object.assign({}, e, m) : e;
   });
 
+  function isArabic() {
+    return state.languageCode === "ar";
+  }
+
+  function loc(obj, enKey, arKey) {
+    if (!obj) return "";
+    if (isArabic() && obj[arKey]) return obj[arKey];
+    return obj[enKey] || "";
+  }
+
   function persist() {
     try {
+      localStorage.setItem(LANG_STORAGE_KEY, state.languageCode);
       const emailMeta = {};
       state.emails.forEach((e) => {
         emailMeta[e.id] = { unread: e.unread, viewed: e.viewed, replied: e.replied };
@@ -139,6 +173,39 @@
         })
       );
     } catch (_) {}
+  }
+
+  function syncUrlLanguage(code) {
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.set("lang", code);
+      window.history.replaceState(null, "", url.toString());
+    } catch (_) {}
+  }
+
+  function setLanguage(code) {
+    const valid = D.LANGUAGES.some((l) => l.code === code) ? code : "ar";
+    state.languageCode = valid;
+    state.showLangModal = false;
+    state.showOriginalEmail = false;
+    if (state.selectedEmailId) {
+      const activeEmail = state.emails.find((e) => e.id === state.selectedEmailId);
+      if (activeEmail && state.emailSummary) {
+        state.emailSummary = D.summarizeEmail(activeEmail, valid);
+      }
+      if (activeEmail && state.smartReplyDraft) {
+        state.smartReplyDraft = D.generateSmartReply(
+          activeEmail,
+          state.replyTone,
+          state.role,
+          (state.session && state.session.name) || "UniSync",
+          valid
+        );
+      }
+    }
+    syncUrlLanguage(valid);
+    persist();
+    render();
   }
 
   let snackbarTimer = null;
@@ -275,6 +342,7 @@
   }
 
   async function startMicrosoftLogin() {
+    const str = D.getStrings(state.languageCode);
     try {
       const randomBytes = new Uint8Array(32);
       crypto.getRandomValues(randomBytes);
@@ -295,7 +363,7 @@
       url.searchParams.set("code_challenge_method", "S256");
       window.location.href = url.toString();
     } catch (_) {
-      showToast("Microsoft OAuth requires HTTPS or localhost.");
+      showToast(str.toastMsRequiresHttps);
     }
   }
 
@@ -303,9 +371,10 @@
     const params = new URLSearchParams(window.location.search);
     const code = params.get("code");
     if (!code) return;
+    const str = D.getStrings(state.languageCode);
     const verifier = sessionStorage.getItem("unisync_ms_verifier");
     const redirectUri = sessionStorage.getItem("unisync_ms_redirect") || (window.location.origin + window.location.pathname);
-    window.history.replaceState({}, document.title, window.location.pathname);
+    syncUrlLanguage(state.languageCode);
     if (!verifier) return;
 
     try {
@@ -372,10 +441,10 @@
         }
         persist();
         render();
-        showToast("Connected to Microsoft Outlook");
+        showToast(str.toastMsConnected);
       }
     } catch (_) {
-      showToast("Signed in locally (Outlook sync offline)");
+      showToast(str.toastMsOffline);
     }
   }
 
@@ -385,8 +454,9 @@
   let recordStartMillis = 0;
 
   async function startVoiceRecording() {
+    const str = D.getStrings(state.languageCode);
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      showToast("Audio recording not supported in this browser");
+      showToast(str.toastVoiceUnsupported);
       return;
     }
     try {
@@ -401,8 +471,10 @@
         const blob = new Blob(audioChunks, { type: "audio/webm" });
         const reader = new FileReader();
         reader.onloadend = () => {
+          const curStr = D.getStrings(state.languageCode);
           const titleEl = document.getElementById("voice-title-input");
-          const title = (titleEl && titleEl.value.trim()) || `Lecture Note ${state.voiceNotes.length + 1}`;
+          const fallbackTitle = `${curStr.voiceNotes} ${state.voiceNotes.length + 1}`;
+          const title = (titleEl && titleEl.value.trim()) || fallbackTitle;
           const durationSec = Math.max(1, Math.round((Date.now() - recordStartMillis) / 1000));
           state.voiceNotes.unshift({
             id: "vn_" + Date.now(),
@@ -413,7 +485,7 @@
           state.recordingVoice = false;
           persist();
           render();
-          showToast("Voice note saved");
+          showToast(curStr.toastVoiceSaved);
         };
         reader.readAsDataURL(blob);
       };
@@ -422,7 +494,7 @@
       mediaRecorder.start();
       render();
     } catch (_) {
-      showToast("Microphone permission required");
+      showToast(str.toastMicDenied);
     }
   }
 
@@ -461,16 +533,17 @@
   }
 
   // --- Time & Formatting Helpers ---
-  function formatCountdown(targetMillis) {
+  function formatCountdown(targetMillis, strObj) {
+    const str = strObj || D.getStrings(state.languageCode);
     const diff = targetMillis - Date.now();
-    if (diff <= 0) return "Due Now";
+    if (diff <= 0) return str.dueNow;
     const totalSec = Math.floor(diff / 1000);
     const days = Math.floor(totalSec / 86400);
     const hrs = Math.floor((totalSec % 86400) / 3600);
     const mins = Math.floor((totalSec % 3600) / 60);
     const secs = totalSec % 60;
     const pad = (n) => String(n).padStart(2, "0");
-    return days > 0 ? `${days}d ${pad(hrs)}:${pad(mins)}:${pad(secs)}` : `${pad(hrs)}:${pad(mins)}:${pad(secs)}`;
+    return days > 0 ? `${days}${str.dayShort} ${pad(hrs)}:${pad(mins)}:${pad(secs)}` : `${pad(hrs)}:${pad(mins)}:${pad(secs)}`;
   }
 
   function formatClock(sec) {
@@ -481,7 +554,8 @@
 
   function formatDateTime(ms) {
     try {
-      return new Intl.DateTimeFormat(state.languageCode === "ar" ? "ar-SA" : "en-US", {
+      const locale = isArabic() ? "ar-SA" : state.languageCode;
+      return new Intl.DateTimeFormat(locale, {
         month: "short",
         day: "numeric",
         hour: "numeric",
@@ -492,12 +566,21 @@
     }
   }
 
-  // Background 1-second tick (updates countdowns and Pomodoro without stealing input focus)
+  function formatBranchChip(branchStr) {
+    const parts = branchStr.split(" —");
+    const main = parts[0];
+    if (isArabic()) {
+      const m = main.match(/\(([^)]+)\)/);
+      return m ? m[1] : main;
+    }
+    return main.replace(/\s*\([^)]+\)/, "").trim();
+  }
+
+  // Background 1-second tick
   setInterval(() => {
     if (!state.session) return;
     const now = Date.now();
 
-    // Check smart alarms
     if (!state.ringingEvent) {
       const due = state.calendarEvents.find(
         (evt) =>
@@ -513,12 +596,11 @@
       }
     }
 
-    // Update live Next Up countdown DOM in place
+    const str = D.getStrings(state.languageCode);
     document.querySelectorAll("[data-countdown-ms]").forEach((el) => {
-      el.textContent = formatCountdown(Number(el.getAttribute("data-countdown-ms")));
+      el.textContent = formatCountdown(Number(el.getAttribute("data-countdown-ms")), str);
     });
 
-    // Pomodoro tick
     if (state.pomodoroRunning) {
       if (state.pomodoroSeconds > 0) {
         state.pomodoroSeconds -= 1;
@@ -565,17 +647,15 @@
   };
 
   function renderPriorityBadge(priority) {
-    const rtl = D.isRtl(state.languageCode);
     const meta = D.PRIORITY_META[priority] || D.PRIORITY_META.NORMAL;
-    return `<span class="badge ${meta.badgeClass}">${escapeHtml(rtl ? meta.labelAr : meta.labelEn)}</span>`;
+    return `<span class="badge ${meta.badgeClass}">${escapeHtml(isArabic() ? meta.labelAr : meta.labelEn)}</span>`;
   }
 
-  function renderUrgentEmailBanner() {
+  function renderUrgentEmailBanner(str) {
     const rtl = D.isRtl(state.languageCode);
-    const str = D.getStrings(state.languageCode);
     const target = state.emails
       .filter((e) => !e.replied && (e.priority === "CRITICAL" || e.priority === "HIGH"))
-      .sort((a, b) => (D.PRIORITY_META[a.priority].rank - D.PRIORITY_META[b.priority].rank))[0];
+      .sort((a, b) => D.PRIORITY_META[a.priority].rank - D.PRIORITY_META[b.priority].rank)[0];
     if (!target) return "";
     const adapted = D.getAdaptedEmail(target, state.languageCode);
     return `
@@ -583,7 +663,7 @@
         <div style="min-width:0;flex:1;">
           <div style="font-size:0.78rem;font-weight:800;color:var(--highlight);">${escapeHtml(str.urgentEmailAlert)} • ${escapeHtml(target.courseTag)}</div>
           <div style="font-weight:700;font-size:0.9rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(adapted.subject)}</div>
-          <div class="muted" style="font-size:0.76rem;">${escapeHtml(target.senderName)} • ${escapeHtml(str.tapToOpenReply)}</div>
+          <div class="muted" style="font-size:0.76rem;">${escapeHtml(loc(target, "senderName", "senderNameAr"))} • ${escapeHtml(str.tapToOpenReply)}</div>
         </div>
         <span style="font-weight:800;color:var(--highlight);">${rtl ? "←" : "→"}</span>
       </div>
@@ -600,8 +680,8 @@
           <span class="badge badge-tag">${escapeHtml(str.nextUp)} • ${escapeHtml(upcoming.courseCode)}</span>
           <button class="btn btn-outline btn-sm" id="btn-open-next-cal">${escapeHtml(str.calendarAlarm)}</button>
         </div>
-        <div class="card-title">${escapeHtml(upcoming.title)}</div>
-        <div class="countdown-digits" data-countdown-ms="${upcoming.eventTimeMillis}">${formatCountdown(upcoming.eventTimeMillis)}</div>
+        <div class="card-title">${escapeHtml(loc(upcoming, "title", "titleAr"))}</div>
+        <div class="countdown-digits" data-countdown-ms="${upcoming.eventTimeMillis}">${formatCountdown(upcoming.eventTimeMillis, str)}</div>
         <div class="muted">${escapeHtml(formatDateTime(upcoming.eventTimeMillis))}</div>
       </div>
     `;
@@ -609,7 +689,6 @@
 
   // --- Screens ---
   function renderLoginScreen(str) {
-    const rtl = D.isRtl(state.languageCode);
     const curLang = D.LANGUAGES.find((l) => l.code === state.languageCode) || D.LANGUAGES[0];
     return `
       <div class="login-wrap">
@@ -625,7 +704,7 @@
           </div>
 
           <div style="font-weight:700;font-size:0.88rem;color:var(--text-secondary);">
-            ${rtl ? "اختر المسار الأكاديمي:" : "Choose Academic Workspace Role:"}
+            ${escapeHtml(str.chooseRole)}
           </div>
           <div class="branch-grid">
             <button class="chip ${state.role === "student" ? "selected" : ""}" data-select-role="student" style="min-height:44px;">🎓 ${escapeHtml(str.studentRole)}</button>
@@ -638,8 +717,8 @@
 
           <div class="divider"></div>
 
-          <input id="academic-name-input" class="field" placeholder="${rtl ? "الاسم الكامل (اختياري)" : "Full Name (optional)"}" />
-          <input id="academic-email-input" class="field" type="email" placeholder="${rtl ? "البريد الجامعي @aou.edu.sa" : "University Email @aou.edu.sa"}" />
+          <input id="academic-name-input" class="field" placeholder="${escapeHtml(str.fullNameOptional)}" />
+          <input id="academic-email-input" class="field" type="email" placeholder="${escapeHtml(str.universityEmailPlaceholder)}" />
           <button class="btn btn-tonal btn-full" id="btn-academic-login">
             ${escapeHtml(str.signInAcademic)}
           </button>
@@ -658,22 +737,22 @@
 
   function renderStudentHome(str) {
     return `
-      ${renderUrgentEmailBanner()}
+      ${renderUrgentEmailBanner(str)}
       ${renderNextUpCard(str)}
       <div class="card">
         <div class="row-between">
           <div class="card-title">${escapeHtml(str.calendarAlarm)}</div>
-          <button class="btn btn-outline btn-sm" id="btn-manage-cal">${D.isRtl(state.languageCode) ? "إدارة" : "Manage"}</button>
+          <button class="btn btn-outline btn-sm" id="btn-manage-cal">${escapeHtml(str.manage)}</button>
         </div>
         ${state.calendarEvents.slice(0, 4).map((evt) => `
           <div class="row-between" style="padding:10px;border:1px solid var(--border-card);border-radius:12px;background:var(--bg-canvas);">
             <div style="min-width:0;">
-              <div style="font-weight:700;font-size:0.9rem;">${escapeHtml(evt.title)}</div>
+              <div style="font-weight:700;font-size:0.9rem;">${escapeHtml(loc(evt, "title", "titleAr"))}</div>
               <div class="muted" style="font-size:0.78rem;">${escapeHtml(evt.courseCode)} • ${escapeHtml(formatDateTime(evt.eventTimeMillis))}</div>
             </div>
             <div class="row-wrap" style="gap:6px;flex-shrink:0;">
-              <button class="btn btn-outline btn-sm" data-ring-evt="${escapeHtml(evt.id)}" aria-label="Test alarm">🔔</button>
-              <button class="switch-btn ${evt.alarmEnabled ? "on" : ""}" data-toggle-alarm="${escapeHtml(evt.id)}" aria-label="Toggle alarm">
+              <button class="btn btn-outline btn-sm" data-ring-evt="${escapeHtml(evt.id)}" aria-label="${escapeHtml(str.previewRingtone)}">🔔</button>
+              <button class="switch-btn ${evt.alarmEnabled ? "on" : ""}" data-toggle-alarm="${escapeHtml(evt.id)}" aria-label="${escapeHtml(str.calendarAlarm)}">
                 <span class="switch-knob"></span>
               </button>
             </div>
@@ -684,7 +763,6 @@
   }
 
   function renderInstructorHome(str) {
-    const rtl = D.isRtl(state.languageCode);
     const activeClusters = D.REPEATED_QUESTIONS.filter((c) => !state.answeredQuestionIds.includes(c.id));
     const primary = activeClusters[0];
 
@@ -693,10 +771,10 @@
         <div class="card">
           <div class="row-between">
             <div class="card-title">${escapeHtml(str.repeatedQuestions)}</div>
-            <span class="badge badge-tag">${primary.askCount}x • ${escapeHtml(primary.courseCode)}</span>
+            <span class="badge badge-tag">${primary.askCount}× • ${escapeHtml(primary.courseCode)}</span>
           </div>
-          <div style="font-weight:700;">${escapeHtml(rtl ? primary.topicAr : primary.topic)}</div>
-          <div class="muted">${escapeHtml(rtl ? primary.summaryAr : primary.summary)}</div>
+          <div style="font-weight:700;">${escapeHtml(loc(primary, "topic", "topicAr"))}</div>
+          <div class="muted">${escapeHtml(loc(primary, "summary", "summaryAr"))}</div>
           <button class="btn btn-primary btn-full" id="btn-open-unified-reply" data-cluster-id="${escapeHtml(primary.id)}">
             ${escapeHtml(str.unifiedReplyAll)}
           </button>
@@ -720,18 +798,18 @@
     return `
       ${repeatedCard}
       ${renderNextUpCard(str)}
-      ${renderUrgentEmailBanner()}
+      ${renderUrgentEmailBanner(str)}
       <div class="row-between">
         <div class="card-title">${escapeHtml(str.inbox)}</div>
-        <button class="btn btn-outline btn-sm" id="btn-ins-open-inbox">${rtl ? "عرض البريد كاملاً" : "Open Full Inbox"}</button>
+        <button class="btn btn-outline btn-sm" id="btn-ins-open-inbox">${escapeHtml(str.openFullInbox)}</button>
       </div>
       ${topEmails.map((email) => {
         const adapted = D.getAdaptedEmail(email, state.languageCode);
         return `
           <div class="card clickable" data-open-email="${escapeHtml(email.id)}">
             <div class="row-between">
-              <span style="font-weight:700;font-size:0.88rem;">${escapeHtml(email.senderName)}</span>
-              <span class="muted" style="font-size:0.75rem;">${escapeHtml(email.receivedAtLabel)}</span>
+              <span style="font-weight:700;font-size:0.88rem;">${escapeHtml(loc(email, "senderName", "senderNameAr"))}</span>
+              <span class="muted" style="font-size:0.75rem;">${escapeHtml(loc(email, "receivedAtLabel", "receivedAtAr"))}</span>
             </div>
             <div style="font-weight:600;font-size:0.94rem;">${escapeHtml(adapted.subject)}</div>
             <div class="row-between">
@@ -755,13 +833,19 @@
         const body = showAdapted ? adapted.body : email.fullBody;
         const savedReply = state.sentEmailReplies[email.id];
 
+        const toneMap = {
+          FORMAL: str.toneFormal,
+          CONCISE: str.toneConcise,
+          SUPPORTIVE: str.toneSupportive
+        };
+
         return `
           <div class="row-between">
             <button class="btn btn-outline btn-sm" id="btn-back-inbox">${rtl ? "→" : "←"} ${escapeHtml(str.backToInbox)}</button>
             ${state.languageCode !== "en" ? `
               <div class="row-wrap">
-                <button class="chip ${!state.showOriginalEmail ? "selected" : ""}" id="btn-view-adapted">${rtl ? "مترجم" : "Adapted"}</button>
-                <button class="chip ${state.showOriginalEmail ? "selected" : ""}" id="btn-view-original">${rtl ? "النص الأصلي" : "Original"}</button>
+                <button class="chip ${!state.showOriginalEmail ? "selected" : ""}" id="btn-view-adapted">${escapeHtml(str.adapted)}</button>
+                <button class="chip ${state.showOriginalEmail ? "selected" : ""}" id="btn-view-original">${escapeHtml(str.original)}</button>
               </div>
             ` : ""}
           </div>
@@ -772,7 +856,7 @@
               <span class="badge badge-tag">${escapeHtml(email.courseTag)}</span>
             </div>
             <div class="card-title" style="font-size:1.1rem;">${escapeHtml(subject)}</div>
-            <div class="muted">${escapeHtml(email.senderName)} (${escapeHtml(email.senderEmail)}) • ${escapeHtml(email.receivedAtLabel)}</div>
+            <div class="muted">${escapeHtml(loc(email, "senderName", "senderNameAr"))} (${escapeHtml(email.senderEmail)}) • ${escapeHtml(loc(email, "receivedAtLabel", "receivedAtAr"))}</div>
             <div class="divider"></div>
             <div style="white-space:pre-wrap;font-size:0.94rem;">${escapeHtml(body)}</div>
           </div>
@@ -791,7 +875,7 @@
 
           ${savedReply ? `
             <div class="card">
-              <div class="badge badge-success">${rtl ? "تم إرسال الرد" : "Sent Reply"}</div>
+              <div class="badge badge-success">${escapeHtml(str.sentReplyBadge)}</div>
               <div style="white-space:pre-wrap;font-size:0.88rem;">${escapeHtml(savedReply)}</div>
             </div>
           ` : ""}
@@ -801,12 +885,12 @@
               <div class="card-title">${escapeHtml(str.smartReply)}</div>
               <div class="row-wrap">
                 ${["FORMAL", "CONCISE", "SUPPORTIVE"].map((t) => `
-                  <button class="chip ${state.replyTone === t ? "selected" : ""}" data-tone-reply="${t}">${t.charAt(0) + t.slice(1).toLowerCase()}</button>
+                  <button class="chip ${state.replyTone === t ? "selected" : ""}" data-tone-reply="${t}">${escapeHtml(toneMap[t])}</button>
                 `).join("")}
               </div>
             </div>
             <button class="btn btn-tonal btn-sm" id="btn-gen-smart-reply">${escapeHtml(str.smartReply)}</button>
-            <textarea id="email-reply-box" class="field" placeholder="${rtl ? "اكتب ردك هنا..." : "Write your reply..."}">${escapeHtml(state.smartReplyDraft)}</textarea>
+            <textarea id="email-reply-box" class="field" placeholder="${escapeHtml(str.writeReplyPlaceholder)}">${escapeHtml(state.smartReplyDraft)}</textarea>
             <button class="btn btn-primary btn-full" id="btn-send-email-reply">${escapeHtml(str.sendReply)}</button>
           </div>
         `;
@@ -823,7 +907,7 @@
       <div class="row-between">
         <h2 class="section-title">${escapeHtml(str.inbox)}</h2>
         <div class="row-wrap">
-          <button class="chip ${state.sortByPriority ? "selected" : ""}" id="btn-toggle-sort">${rtl ? "ترتيب بالأولوية" : "Priority Sort"}</button>
+          <button class="chip ${state.sortByPriority ? "selected" : ""}" id="btn-toggle-sort">${escapeHtml(str.prioritySort)}</button>
           <button class="btn btn-primary btn-sm" id="btn-open-compose">+ ${escapeHtml(str.compose)}</button>
         </div>
       </div>
@@ -832,7 +916,7 @@
         <button class="chip ${!state.priorityFilter ? "selected" : ""}" data-prio-filter="ALL">${escapeHtml(str.all)}</button>
         ${["CRITICAL", "HIGH", "NORMAL", "LOW"].map((p) => {
           const meta = D.PRIORITY_META[p];
-          return `<button class="chip ${state.priorityFilter === p ? "selected" : ""}" data-prio-filter="${p}">${escapeHtml(rtl ? meta.labelAr : meta.labelEn)}</button>`;
+          return `<button class="chip ${state.priorityFilter === p ? "selected" : ""}" data-prio-filter="${p}">${escapeHtml(isArabic() ? meta.labelAr : meta.labelEn)}</button>`;
         }).join("")}
       </div>
 
@@ -841,8 +925,8 @@
         return `
           <div class="card clickable" data-open-email="${escapeHtml(email.id)}">
             <div class="row-between">
-              <span style="font-weight:${email.unread ? 800 : 600};">${escapeHtml(email.senderName)}</span>
-              <span class="muted" style="font-size:0.75rem;">${escapeHtml(email.receivedAtLabel)}</span>
+              <span style="font-weight:${email.unread ? 800 : 600};">${escapeHtml(loc(email, "senderName", "senderNameAr"))}</span>
+              <span class="muted" style="font-size:0.75rem;">${escapeHtml(loc(email, "receivedAtLabel", "receivedAtAr"))}</span>
             </div>
             <div style="font-weight:${email.unread ? 700 : 500};font-size:0.95rem;">${escapeHtml(adapted.subject)}</div>
             <div class="row-between">
@@ -870,18 +954,18 @@
       </div>
 
       ${!answeredClusters.length && !reviewedEmails.length ? `
-        <div class="card"><div class="muted">${rtl ? "لا توجد عناصر مردود عليها أو مقروءة بعد." : "No replied or reviewed items yet."}</div></div>
+        <div class="card"><div class="muted">${escapeHtml(str.noHistoryYet)}</div></div>
       ` : ""}
 
       ${state.role === "instructor" && answeredClusters.length ? `
-        <div style="font-weight:800;color:var(--primary);">${rtl ? "الأسئلة الطلابية المجاب عنها" : "Answered Repeated Questions"}</div>
+        <div style="font-weight:800;color:var(--primary);">${escapeHtml(str.answeredRepeatedHeader)}</div>
         ${answeredClusters.map((c) => `
           <div class="card">
             <div class="row-between">
               <span class="badge badge-tag">${escapeHtml(c.courseCode)} • ${c.askCount}</span>
-              <span class="badge badge-success">${rtl ? "تم الرد" : "Answered"}</span>
+              <span class="badge badge-success">${escapeHtml(str.answeredBadge)}</span>
             </div>
-            <div class="card-title">${escapeHtml(rtl ? c.topicAr : c.topic)}</div>
+            <div class="card-title">${escapeHtml(loc(c, "topic", "topicAr"))}</div>
             ${state.answeredQuestionReplies[c.id] ? `
               <div style="padding:10px;border-radius:10px;background:var(--bg-canvas);border:1px solid var(--border-card);white-space:pre-wrap;font-size:0.86rem;">
                 ${escapeHtml(state.answeredQuestionReplies[c.id])}
@@ -892,20 +976,20 @@
       ` : ""}
 
       ${reviewedEmails.length ? `
-        <div style="font-weight:800;color:var(--primary);">${rtl ? "الرسائل المردود عليها والمقروءة" : "Replied & Reviewed Emails"} (${reviewedEmails.length})</div>
+        <div style="font-weight:800;color:var(--primary);">${escapeHtml(str.repliedEmailsHeader)} (${reviewedEmails.length})</div>
         ${reviewedEmails.map((email) => {
           const adapted = D.getAdaptedEmail(email, state.languageCode);
           const replySaved = state.sentEmailReplies[email.id];
           return `
             <div class="card clickable" data-open-email="${escapeHtml(email.id)}">
               <div class="row-between">
-                <span style="font-weight:700;">${escapeHtml(email.senderName)}</span>
-                <span class="badge ${email.replied ? "badge-success" : "badge-tag"}">${email.replied ? (rtl ? "تم الرد" : "Replied") : (rtl ? "مقروء" : "Reviewed")}</span>
+                <span style="font-weight:700;">${escapeHtml(loc(email, "senderName", "senderNameAr"))}</span>
+                <span class="badge ${email.replied ? "badge-success" : "badge-tag"}">${escapeHtml(email.replied ? str.repliedLabel : str.reviewedLabel)}</span>
               </div>
               <div style="font-weight:600;">${escapeHtml(adapted.subject)}</div>
               <div class="row-between">
                 ${renderPriorityBadge(email.priority)}
-                <span class="muted" style="font-size:0.76rem;">${escapeHtml(email.courseTag)} • ${escapeHtml(email.receivedAtLabel)}</span>
+                <span class="muted" style="font-size:0.76rem;">${escapeHtml(email.courseTag)} • ${escapeHtml(loc(email, "receivedAtLabel", "receivedAtAr"))}</span>
               </div>
               ${replySaved ? `<div class="muted" style="padding:8px;border-radius:8px;background:var(--bg-canvas);border:1px solid var(--border-card);">${escapeHtml(replySaved)}</div>` : ""}
             </div>
@@ -916,7 +1000,7 @@
   }
 
   function renderRoadmapsScreen(str) {
-    const rtl = D.isRtl(state.languageCode);
+    const ar = isArabic();
     const major = D.MAJORS.find((m) => m.id === state.selectedMajorId) || D.MAJORS[0];
     const completedCount = major.courses.filter((c) => state.courseStatuses[c.code] === "completed").length;
     const totalCount = major.courses.length;
@@ -938,7 +1022,7 @@
       <div class="row-scroll">
         ${D.MAJORS.map((m) => `
           <button class="chip ${m.id === major.id ? "selected" : ""}" data-select-major="${m.id}">
-            ${escapeHtml(rtl ? m.nameAr : m.nameEn)}
+            ${escapeHtml(ar ? m.nameAr : m.nameEn)}
           </button>
         `).join("")}
       </div>
@@ -953,7 +1037,7 @@
         </div>
         <div class="row-wrap">
           ${D.COURSE_STATUSES.map((s) => `
-            <span class="badge" style="background:${s.color}22;color:${s.color};">${escapeHtml(rtl ? s.labelAr : s.labelEn)}</span>
+            <span class="badge" style="background:${s.color}22;color:${s.color};">${escapeHtml(ar ? s.labelAr : s.labelEn)}</span>
           `).join("")}
         </div>
       </div>
@@ -964,7 +1048,7 @@
           <div class="roadmap-stages">
             ${stageKeys.map((st) => `
               <div class="roadmap-stage-row">
-                <div style="font-weight:800;font-size:0.8rem;color:var(--primary);">${rtl ? `المرحلة ${st}` : `Stage ${st}`}</div>
+                <div style="font-weight:800;font-size:0.8rem;color:var(--primary);">${escapeHtml(str.stageLabel)} ${st}</div>
                 <div class="roadmap-nodes-row">
                   ${stagesMap[st].map((course) => {
                     const stKey = state.courseStatuses[course.code] || "not_started";
@@ -974,17 +1058,17 @@
                         <div>
                           <div class="row-between">
                             <strong style="font-size:0.86rem;color:${stMeta.color};">${escapeHtml(course.code)}</strong>
-                            <span class="muted" style="font-size:0.72rem;">${course.credits} cr</span>
+                            <span class="muted" style="font-size:0.72rem;">${course.credits} ${escapeHtml(str.creditsShort)}</span>
                           </div>
-                          <div style="font-weight:600;font-size:0.78rem;line-height:1.25;margin-top:4px;">${escapeHtml(course.title)}</div>
+                          <div style="font-weight:600;font-size:0.78rem;line-height:1.25;margin-top:4px;">${escapeHtml(loc(course, "title", "titleAr"))}</div>
                         </div>
                         <div>
-                          <div style="font-size:0.7rem;font-weight:700;color:${stMeta.color};">${escapeHtml(rtl ? stMeta.labelAr : stMeta.labelEn)}</div>
+                          <div style="font-size:0.7rem;font-weight:700;color:${stMeta.color};">${escapeHtml(ar ? stMeta.labelAr : stMeta.labelEn)}</div>
                           <div class="course-node-status-bar">
                             ${D.COURSE_STATUSES.map((opt) => `
                               <button class="status-dot-btn" data-set-course="${escapeHtml(course.code)}" data-status="${opt.key}"
                                 style="${stKey === opt.key ? `background:${opt.color};color:#fff;border-color:${opt.color};` : ""}">
-                                ${escapeHtml(rtl ? opt.shortAr : opt.shortEn)}
+                                ${escapeHtml(ar ? opt.shortAr : opt.shortEn)}
                               </button>
                             `).join("")}
                           </div>
@@ -1025,7 +1109,6 @@
 
   function renderPomodoroScreen(str) {
     // ZERO explanatory text, descriptions, or notes anywhere on Pomodoro screen!
-    const rtl = D.isRtl(state.languageCode);
     const locked = isFocusLocked();
     const progress30 = state.totalPomodoroMinutes % 30;
     const pct30 = Math.round((progress30 / 30) * 100);
@@ -1034,11 +1117,11 @@
       ${!locked ? `
         <div class="row-between">
           <h2 class="section-title">${escapeHtml(str.pomodoro)}</h2>
-          <span class="badge badge-tag">🏆 ${state.totalPomodoroMinutes} min</span>
+          <span class="badge badge-tag">🏆 ${state.totalPomodoroMinutes} ${escapeHtml(str.minuteUnit)}</span>
         </div>
         <div class="row-wrap">
-          <button class="chip ${state.companionGender === "girl" ? "selected" : ""}" data-companion="girl">${rtl ? "طالبة" : "Girl"}</button>
-          <button class="chip ${state.companionGender === "boy" ? "selected" : ""}" data-companion="boy">${rtl ? "طالب" : "Boy"}</button>
+          <button class="chip ${state.companionGender === "girl" ? "selected" : ""}" data-companion="girl">${escapeHtml(str.girlLabel)}</button>
+          <button class="chip ${state.companionGender === "boy" ? "selected" : ""}" data-companion="boy">${escapeHtml(str.boyLabel)}</button>
         </div>
       ` : `
         <div style="display:flex;justify-content:center;color:var(--primary);padding-top:8px;">
@@ -1058,12 +1141,12 @@
         ${!locked ? `
           <div class="row-wrap" style="justify-content:center;">
             ${[25, 30, 45, 50, 60].map((d) => `
-              <button class="chip ${state.pomodoroDuration === d && !state.pomodoroIsBreak ? "selected" : ""}" data-pomo-dur="${d}">${d}m</button>
+              <button class="chip ${state.pomodoroDuration === d && !state.pomodoroIsBreak ? "selected" : ""}" data-pomo-dur="${d}">${d}${escapeHtml(str.minutesShort)}</button>
             `).join("")}
           </div>
           <div class="branch-grid">
-            <button class="btn btn-primary" id="btn-pomo-start" ${state.pomodoroRunning ? "disabled" : ""}>▶ ${rtl ? "بدء التركيز" : "Start Focus"}</button>
-            <button class="btn btn-outline" id="btn-pomo-break" ${state.pomodoroRunning ? "disabled" : ""}>☕ ${rtl ? "استراحة 5 د" : "5m Break"}</button>
+            <button class="btn btn-primary" id="btn-pomo-start" ${state.pomodoroRunning ? "disabled" : ""}>▶ ${escapeHtml(str.startFocus)}</button>
+            <button class="btn btn-outline" id="btn-pomo-break" ${state.pomodoroRunning ? "disabled" : ""}>☕ ${escapeHtml(str.shortBreak)}</button>
           </div>
         ` : ""}
 
@@ -1074,7 +1157,7 @@
 
       <div class="card">
         <div class="row-between">
-          <span style="font-weight:700;font-size:0.9rem;">🏆 ${rtl ? "وسام 30 دقيقة" : "30m Milestone"}</span>
+          <span style="font-weight:700;font-size:0.9rem;">🏆 ${escapeHtml(str.milestone30)}</span>
           <span style="font-weight:800;color:var(--primary);">${progress30} / 30</span>
         </div>
         <div class="progress-track"><div class="progress-fill" style="width:${pct30}%"></div></div>
@@ -1083,7 +1166,6 @@
   }
 
   function renderChatScreen(str) {
-    const rtl = D.isRtl(state.languageCode);
     const showGen = state.role === "student";
     const channel = showGen && state.chatTab === "general" ? "general" : "direct";
     const msgs = state.chatMessages.filter((m) => m.channel === channel);
@@ -1092,18 +1174,18 @@
       <h2 class="section-title">${escapeHtml(str.chat)}</h2>
       ${showGen ? `
         <div class="branch-grid">
-          <button class="chip ${channel === "direct" ? "selected" : ""}" data-chat-tab="direct">${rtl ? "محادثة عضو هيئة التدريس" : "Direct Instructor Chat"}</button>
-          <button class="chip ${channel === "general" ? "selected" : ""}" data-chat-tab="general">${rtl ? "المحادثة الطلابية العامة" : "General Student Chat"}</button>
+          <button class="chip ${channel === "direct" ? "selected" : ""}" data-chat-tab="direct">${escapeHtml(str.directInstructorChat)}</button>
+          <button class="chip ${channel === "general" ? "selected" : ""}" data-chat-tab="general">${escapeHtml(str.generalStudentChat)}</button>
         </div>
-      ` : `<span class="badge badge-tag">${rtl ? "تواصل مباشر مع الطلبة دون الحاجة لأرقام هواتف" : "Direct Student–Instructor Chat (No phone numbers required)"}</span>`}
+      ` : `<span class="badge badge-tag">${escapeHtml(str.directChatNotice)}</span>`}
 
       ${msgs.map((m) => `
         <div class="card">
           <div class="row-between">
-            <strong style="color:var(--primary);font-size:0.86rem;">${escapeHtml(m.senderName)}</strong>
+            <strong style="color:var(--primary);font-size:0.86rem;">${escapeHtml(loc(m, "senderName", "senderNameAr"))}</strong>
             ${m.courseTag ? `<span class="badge badge-tag">${escapeHtml(m.courseTag)}</span>` : ""}
           </div>
-          <div style="white-space:pre-wrap;font-size:0.92rem;">${escapeHtml(m.text)}</div>
+          <div style="white-space:pre-wrap;font-size:0.92rem;">${escapeHtml(loc(m, "text", "textAr"))}</div>
           ${m.imageDataUrl ? `<img src="${m.imageDataUrl}" alt="Attachment" style="width:100%;max-height:190px;object-fit:cover;border-radius:10px;"/>` : ""}
         </div>
       `).join("")}
@@ -1117,58 +1199,57 @@
             </label>
           ` : ""}
           <input id="chat-course-input" class="field" style="width:92px;" value="TM351" />
-          <input id="chat-msg-input" class="field" style="flex:1;" placeholder="${rtl ? "اكتب رسالتك..." : "Message..."}" />
-          <button class="btn btn-primary btn-sm" id="btn-chat-send">${rtl ? "إرسال" : "Send"}</button>
+          <input id="chat-msg-input" class="field" style="flex:1;" placeholder="${escapeHtml(str.writeMessagePlaceholder)}" />
+          <button class="btn btn-primary btn-sm" id="btn-chat-send">${escapeHtml(str.sendLabel)}</button>
         </div>
       </div>
     `;
   }
 
   function renderCalendarScreen(str) {
-    const rtl = D.isRtl(state.languageCode);
     return `
       <h2 class="section-title">${escapeHtml(str.calendarAlarm)}</h2>
-      ${renderUrgentEmailBanner()}
+      ${renderUrgentEmailBanner(str)}
 
       <div class="card">
-        <div class="card-title">${rtl ? "إضافة موعد وتنبيه ذكي" : "Schedule Event & Smart Alarm"}</div>
+        <div class="card-title">${escapeHtml(str.scheduleEventTitle)}</div>
         <div class="row-wrap">
           <input id="cal-course-input" class="field" style="width:104px;" placeholder="TM351" />
-          <input id="cal-title-input" class="field" style="flex:1;" placeholder="${rtl ? "عنوان الموعد أو الاختبار" : "Event / Deadline Title"}" />
+          <input id="cal-title-input" class="field" style="flex:1;" placeholder="${escapeHtml(str.eventTitlePlaceholder)}" />
         </div>
         <div class="row-wrap">
           <select id="cal-offset-select" class="field" style="flex:1;">
-            <option value="1">${rtl ? "بعد دقيقة واحدة" : "In 1 min (Test Alarm)"}</option>
-            <option value="60" selected>${rtl ? "بعد ساعة" : "In 1 hour"}</option>
-            <option value="1440">${rtl ? "بعد يوم" : "In 1 day"}</option>
-            <option value="4320">${rtl ? "بعد 3 أيام" : "In 3 days"}</option>
+            <option value="1">${escapeHtml(str.in1Min)}</option>
+            <option value="60" selected>${escapeHtml(str.in1Hour)}</option>
+            <option value="1440">${escapeHtml(str.in1Day)}</option>
+            <option value="4320">${escapeHtml(str.in3Days)}</option>
           </select>
-          <button class="btn btn-primary" id="btn-add-cal-event">${rtl ? "حفظ الموعد" : "Save Event"}</button>
+          <button class="btn btn-primary" id="btn-add-cal-event">${escapeHtml(str.saveEvent)}</button>
         </div>
       </div>
 
       <div class="card">
-        <div class="card-title">${rtl ? "نغمة التنبيه ومستوى الصوت" : "Alarm Ringtone & Volume"}</div>
+        <div class="card-title">${escapeHtml(str.ringtoneVolumeTitle)}</div>
         <div class="row-scroll">
           ${D.RINGTONES.map((r) => `
-            <button class="chip ${state.alarmRingtoneId === r.id ? "selected" : ""}" data-ringtone-id="${r.id}">${escapeHtml(r.label)}</button>
+            <button class="chip ${state.alarmRingtoneId === r.id ? "selected" : ""}" data-ringtone-id="${r.id}">${escapeHtml(loc(r, "label", "labelAr"))}</button>
           `).join("")}
         </div>
         <input type="range" id="alarm-vol-slider" min="0.1" max="1" step="0.05" value="${state.alarmVolume}" />
-        <button class="btn btn-outline btn-sm" id="btn-preview-ringtone">${rtl ? "معاينة نغمة المنبه" : "Preview Alarm Tone"}</button>
+        <button class="btn btn-outline btn-sm" id="btn-preview-ringtone">${escapeHtml(str.previewRingtone)}</button>
       </div>
 
       ${state.calendarEvents.map((evt) => `
         <div class="card">
           <div class="row-between">
             <div style="min-width:0;flex:1;">
-              <div class="card-title">${escapeHtml(evt.title)}</div>
-              <div class="muted">${escapeHtml(evt.courseCode)} • ${escapeHtml(formatDateTime(evt.eventTimeMillis))} • <span data-countdown-ms="${evt.eventTimeMillis}">${formatCountdown(evt.eventTimeMillis)}</span></div>
+              <div class="card-title">${escapeHtml(loc(evt, "title", "titleAr"))}</div>
+              <div class="muted">${escapeHtml(evt.courseCode)} • ${escapeHtml(formatDateTime(evt.eventTimeMillis))} • <span data-countdown-ms="${evt.eventTimeMillis}">${formatCountdown(evt.eventTimeMillis, str)}</span></div>
             </div>
             <div class="row-wrap">
-              <button class="btn btn-outline btn-sm" data-ring-evt="${escapeHtml(evt.id)}">🔔</button>
-              <button class="switch-btn ${evt.alarmEnabled ? "on" : ""}" data-toggle-alarm="${escapeHtml(evt.id)}"><span class="switch-knob"></span></button>
-              <button class="btn btn-outline btn-sm" data-del-evt="${escapeHtml(evt.id)}">🗑</button>
+              <button class="btn btn-outline btn-sm" data-ring-evt="${escapeHtml(evt.id)}" aria-label="${escapeHtml(str.previewRingtone)}">🔔</button>
+              <button class="switch-btn ${evt.alarmEnabled ? "on" : ""}" data-toggle-alarm="${escapeHtml(evt.id)}" aria-label="${escapeHtml(str.calendarAlarm)}"><span class="switch-knob"></span></button>
+              <button class="btn btn-outline btn-sm" data-del-evt="${escapeHtml(evt.id)}" aria-label="${escapeHtml(str.cancel)}">🗑</button>
             </div>
           </div>
         </div>
@@ -1177,19 +1258,18 @@
   }
 
   function renderMaterialsScreen(str, readOnly) {
-    const rtl = D.isRtl(state.languageCode);
     return `
       <h2 class="section-title">${escapeHtml(str.materials)}</h2>
       ${!readOnly ? `
         <div class="card">
-          <div class="card-title">${rtl ? "نشر مادة تعليمية أو رابط" : "Publish Lecture Material or Link"}</div>
+          <div class="card-title">${escapeHtml(str.publishMaterialTitle)}</div>
           <div class="row-wrap">
             <input id="mat-course-input" class="field" style="width:105px;" value="TM351" />
-            <input id="mat-title-input" class="field" style="flex:1;" placeholder="${rtl ? "عنوان المادة" : "Title"}" />
+            <input id="mat-title-input" class="field" style="flex:1;" placeholder="${escapeHtml(str.materialTitlePlaceholder)}" />
           </div>
-          <input id="mat-desc-input" class="field" placeholder="${rtl ? "وصف مختصر" : "Notes / Summary"}" />
+          <input id="mat-desc-input" class="field" placeholder="${escapeHtml(str.notesSummaryPlaceholder)}" />
           <input id="mat-url-input" class="field" placeholder="https://lms.aou.edu.sa/..." />
-          <button class="btn btn-primary btn-full" id="btn-publish-material">${rtl ? "نشر للمقرر" : "Publish to Course"}</button>
+          <button class="btn btn-primary btn-full" id="btn-publish-material">${escapeHtml(str.publishToCourse)}</button>
         </div>
       ` : ""}
       ${state.facultyMaterials.map((m) => `
@@ -1198,8 +1278,8 @@
             <span class="badge badge-tag">${escapeHtml(m.courseCode)} • ${escapeHtml(m.materialType.toUpperCase())}</span>
             ${!readOnly ? `<button class="btn btn-outline btn-sm" data-del-mat="${escapeHtml(m.id)}">🗑</button>` : ""}
           </div>
-          <div class="card-title">${escapeHtml(m.title)}</div>
-          ${m.description ? `<div class="muted">${escapeHtml(m.description)}</div>` : ""}
+          <div class="card-title">${escapeHtml(loc(m, "title", "titleAr"))}</div>
+          ${(m.description || m.descriptionAr) ? `<div class="muted">${escapeHtml(loc(m, "description", "descriptionAr"))}</div>` : ""}
           ${m.resourceUrl ? `<a class="btn btn-outline btn-sm" href="${escapeHtml(m.resourceUrl)}" target="_blank" rel="noopener noreferrer" style="text-decoration:none;">🔗 ${escapeHtml(m.resourceUrl)}</a>` : ""}
         </div>
       `).join("")}
@@ -1207,7 +1287,6 @@
   }
 
   function renderSettingsScreen(str) {
-    const rtl = D.isRtl(state.languageCode);
     const curLang = D.LANGUAGES.find((l) => l.code === state.languageCode) || D.LANGUAGES[0];
     const initials = (state.session && state.session.name ? state.session.name.slice(0, 2) : "AU").toUpperCase();
 
@@ -1219,7 +1298,7 @@
             <div class="avatar-circle">
               ${state.profilePhotoDataUrl ? `<img src="${state.profilePhotoDataUrl}" alt="Profile"/>` : escapeHtml(initials)}
             </div>
-            <label class="avatar-camera-btn" title="Change profile photo">
+            <label class="avatar-camera-btn">
               ${ICONS.camera}
               <input type="file" accept="image/*" id="profile-photo-input" hidden />
             </label>
@@ -1237,33 +1316,33 @@
           <span style="font-weight:700;">${escapeHtml(str.darkMode)}</span>
           <button class="switch-btn ${state.darkMode ? "on" : ""}" id="btn-settings-dark"><span class="switch-knob"></span></button>
         </div>
-        <div style="font-weight:700;font-size:0.9rem;">${rtl ? "حجم الخط" : "Font Size"}</div>
+        <div style="font-weight:700;font-size:0.9rem;">${escapeHtml(str.fontSize)}</div>
         <div class="row-scroll">
           ${[
-            { s: 0.88, en: "Small", ar: "صغير" },
-            { s: 1, en: "Normal", ar: "عادي" },
-            { s: 1.14, en: "Large", ar: "كبير" },
-            { s: 1.28, en: "Extra Large", ar: "كبير جداً" }
+            { s: 0.88, label: str.fontSmall },
+            { s: 1, label: str.fontNormal },
+            { s: 1.14, label: str.fontLarge },
+            { s: 1.28, label: str.fontXLarge }
           ].map((opt) => `
-            <button class="chip ${Math.abs(state.fontScale - opt.s) < 0.02 ? "selected" : ""}" data-font-scale="${opt.s}">${escapeHtml(rtl ? opt.ar : opt.en)}</button>
+            <button class="chip ${Math.abs(state.fontScale - opt.s) < 0.02 ? "selected" : ""}" data-font-scale="${opt.s}">${escapeHtml(opt.label)}</button>
           `).join("")}
         </div>
       </div>
 
       <div class="card">
         <button class="btn btn-outline btn-full" id="btn-settings-lang">🌐 ${escapeHtml(str.language)}: ${escapeHtml(curLang.nativeName)}</button>
-        <div style="font-weight:700;font-size:0.92rem;">${rtl ? "فروع الجامعة في المملكة العربية السعودية" : "AOU Branches — Saudi Arabia"}</div>
+        <div style="font-weight:700;font-size:0.92rem;">${escapeHtml(str.saudiBranchesTitle)}</div>
         <div class="branch-grid">
           ${D.SAUDI_BRANCHES.map((b) => `
             <button class="chip ${state.aouBranch === b ? "selected" : ""}" data-select-branch="${escapeHtml(b)}" style="justify-content:flex-start;overflow:hidden;text-overflow:ellipsis;">
-              ${escapeHtml(b.split(" —")[0])}
+              ${escapeHtml(formatBranchChip(b))}
             </button>
           `).join("")}
         </div>
-        <div class="muted" style="font-size:0.78rem;">${rtl ? "الفروع الإقليمية الأخرى" : "Other Regional AOU Branches"}</div>
+        <div class="muted" style="font-size:0.78rem;">${escapeHtml(str.regionalBranchesTitle)}</div>
         <div class="row-scroll">
           ${D.REGIONAL_BRANCHES.map((b) => `
-            <button class="chip ${state.aouBranch === b ? "selected" : ""}" data-select-branch="${escapeHtml(b)}">${escapeHtml(b)}</button>
+            <button class="chip ${state.aouBranch === b ? "selected" : ""}" data-select-branch="${escapeHtml(b)}">${escapeHtml(formatBranchChip(b))}</button>
           `).join("")}
         </div>
       </div>
@@ -1282,9 +1361,9 @@
       else if (state.studentSubTool === "materials") inner = renderMaterialsScreen(str, true);
       else if (state.studentSubTool === "study") {
         inner = `
-          <h2 class="section-title">${rtl ? "مساعد الدراسة" : "Study Assistant"}</h2>
+          <h2 class="section-title">${escapeHtml(str.studyAssistant)}</h2>
           <div class="card">
-            <div class="muted">${rtl ? "اسأل عن مفاهيم مقررات الجامعة أو خطة مراجعة الاختبارات." : "Ask about any AOU course concept, TMA structure, or exam revision strategy."}</div>
+            <div class="muted">${escapeHtml(str.studyAssistantIntro)}</div>
           </div>
           ${state.studyMessages.map((m) => `
             <div class="card" style="${m.user ? "background:var(--primary-container);color:var(--on-primary-container);" : ""}">
@@ -1292,30 +1371,36 @@
             </div>
           `).join("")}
           <div class="row-wrap">
-            <input id="study-ask-input" class="field" style="flex:1;" placeholder="${rtl ? "اكتب سؤالك الدراسي..." : "Ask a study question"}" />
-            <button class="btn btn-primary btn-sm" id="btn-study-ask">${rtl ? "اسأل" : "Ask"}</button>
+            <input id="study-ask-input" class="field" style="flex:1;" placeholder="${escapeHtml(str.askStudyQuestion)}" />
+            <button class="btn btn-primary btn-sm" id="btn-study-ask">${escapeHtml(str.askBtn)}</button>
           </div>
         `;
       } else if (state.studentSubTool === "qa") {
-        const filtered = D.FRESHMEN_QA.filter((q) => !state.freshmanSearch || q.q.toLowerCase().includes(state.freshmanSearch.toLowerCase()) || q.a.toLowerCase().includes(state.freshmanSearch.toLowerCase()));
+        const term = (state.freshmanSearch || "").toLowerCase();
+        const filtered = D.FRESHMEN_QA.filter((q) => !term ||
+          q.q.toLowerCase().includes(term) ||
+          q.a.toLowerCase().includes(term) ||
+          (q.qAr || "").includes(state.freshmanSearch) ||
+          (q.aAr || "").includes(state.freshmanSearch)
+        );
         inner = `
-          <h2 class="section-title">${rtl ? "أسئلة المستجدين" : "Freshmen Q&A"}</h2>
-          <input id="qa-search-input" class="field" value="${escapeHtml(state.freshmanSearch)}" placeholder="${rtl ? "ابحث في دليل الجامعة..." : "Search AOU guides (LMS, TMA, GPA)"}" />
+          <h2 class="section-title">${escapeHtml(str.freshmenQa)}</h2>
+          <input id="qa-search-input" class="field" value="${escapeHtml(state.freshmanSearch)}" placeholder="${escapeHtml(str.searchQaPlaceholder)}" />
           ${filtered.map((q) => `
             <div class="card">
-              <span class="badge badge-tag">${escapeHtml(q.category)}</span>
-              <div class="card-title">${escapeHtml(q.q)}</div>
-              <div class="muted">${escapeHtml(q.a)}</div>
+              <span class="badge badge-tag">${escapeHtml(loc(q, "category", "categoryAr"))}</span>
+              <div class="card-title">${escapeHtml(loc(q, "q", "qAr"))}</div>
+              <div class="muted">${escapeHtml(loc(q, "a", "aAr"))}</div>
             </div>
           `).join("")}
         `;
       } else if (state.studentSubTool === "voice") {
         inner = `
-          <h2 class="section-title">${rtl ? "الملاحظات الصوتية" : "Voice Notes"}</h2>
+          <h2 class="section-title">${escapeHtml(str.voiceNotes)}</h2>
           <div class="card">
-            <input id="voice-title-input" class="field" placeholder="${rtl ? "عنوان التسجيل الصوتي" : "Voice Note Title"}" />
+            <input id="voice-title-input" class="field" placeholder="${escapeHtml(str.voiceTitlePlaceholder)}" />
             <button class="btn ${state.recordingVoice ? "btn-danger-outline" : "btn-primary"} btn-full" id="btn-voice-toggle">
-              ${state.recordingVoice ? (rtl ? "⏹ إيقاف وحفظ التسجيل" : "⏹ Stop & Save Recording") : (rtl ? "🎙 بدء التسجيل الصوتي" : "🎙 Record Voice Note")}
+              ${state.recordingVoice ? `⏹ ${escapeHtml(str.stopSaveRecording)}` : `🎙 ${escapeHtml(str.recordVoiceNote)}`}
             </button>
           </div>
           ${state.voiceNotes.map((v) => `
@@ -1329,15 +1414,15 @@
         `;
       } else if (state.studentSubTool === "notes") {
         inner = `
-          <h2 class="section-title">${rtl ? "ملاحظاتي ومساحة الكتابة" : "My Materials & Writing Space"}</h2>
+          <h2 class="section-title">${escapeHtml(str.personalNotes)}</h2>
           <div class="card">
             <div class="row-wrap">
               <input id="note-course-input" class="field" style="width:105px;" placeholder="TM351" />
-              <input id="note-title-input" class="field" style="flex:1;" placeholder="${rtl ? "عنوان الملاحظة" : "Note Title"}" />
+              <input id="note-title-input" class="field" style="flex:1;" placeholder="${escapeHtml(str.noteTitlePlaceholder)}" />
             </div>
-            <textarea id="note-body-input" class="field" placeholder="${rtl ? "اكتب ملاحظاتك هنا..." : "Write your study notes here..."}"></textarea>
-            <input id="note-url-input" class="field" placeholder="${rtl ? "رابط اختياري" : "Optional Link URL"}" />
-            <button class="btn btn-primary btn-full" id="btn-save-note">${rtl ? "حفظ الملاحظة" : "Save Note"}</button>
+            <textarea id="note-body-input" class="field" placeholder="${escapeHtml(str.writeNotesPlaceholder)}"></textarea>
+            <input id="note-url-input" class="field" placeholder="${escapeHtml(str.optionalLinkPlaceholder)}" />
+            <button class="btn btn-primary btn-full" id="btn-save-note">${escapeHtml(str.saveNote)}</button>
           </div>
           ${state.manualNotes.map((n) => `
             <div class="card">
@@ -1352,18 +1437,18 @@
         `;
       }
       return `
-        <button class="btn btn-outline btn-sm" id="btn-back-tools" style="align-self:flex-start;">${rtl ? "→" : "←"} ${rtl ? "العودة للأدوات" : "Back to Tools"}</button>
+        <button class="btn btn-outline btn-sm" id="btn-back-tools" style="align-self:flex-start;">${rtl ? "→" : "←"} ${escapeHtml(str.backToTools)}</button>
         ${inner}
       `;
     }
 
     const items = [
       { id: "calendar", label: str.calendarAlarm, icon: "📅" },
-      { id: "study", label: rtl ? "مساعد الدراسة" : "Study Assistant", icon: "✨" },
-      { id: "qa", label: rtl ? "أسئلة المستجدين" : "Freshmen Q&A", icon: "❓" },
-      { id: "voice", label: rtl ? "الملاحظات الصوتية" : "Voice Notes Recorder", icon: "🎙" },
-      { id: "notes", label: rtl ? "ملاحظاتي ومساحة الكتابة" : "My Materials & Writing Space", icon: "📝" },
-      { id: "materials", label: rtl ? "مواد أعضاء هيئة التدريس" : "Faculty Lecture Materials", icon: "📂" },
+      { id: "study", label: str.studyAssistant, icon: "✨" },
+      { id: "qa", label: str.freshmenQa, icon: "❓" },
+      { id: "voice", label: str.voiceNotes, icon: "🎙" },
+      { id: "notes", label: str.personalNotes, icon: "📝" },
+      { id: "materials", label: str.facultyMaterials, icon: "📂" },
       { id: "settings", label: str.settings, icon: "⚙️" }
     ];
 
@@ -1382,7 +1467,7 @@
 
   // --- Modals & Overlays ---
   function renderModals(str) {
-    const rtl = D.isRtl(state.languageCode);
+    const ar = isArabic();
     let html = "";
 
     if (state.unifiedReplyClusterId) {
@@ -1392,10 +1477,10 @@
           <div class="modal-backdrop">
             <div class="modal-panel">
               <div class="card-title">${escapeHtml(str.unifiedReplyAll)} (${escapeHtml(cluster.courseCode)})</div>
-              <div class="muted">${rtl ? `${cluster.askCount} طالباً` : `${cluster.askCount} students`} • ${escapeHtml(rtl ? cluster.topicAr : cluster.topic)}</div>
+              <div class="muted">${cluster.askCount} ${escapeHtml(str.studentsCountLabel)} • ${escapeHtml(loc(cluster, "topic", "topicAr"))}</div>
               <textarea id="unified-reply-textarea" class="field" rows="5">${escapeHtml(state.unifiedReplyText)}</textarea>
               <div class="row-between">
-                <button class="btn btn-outline" id="btn-cancel-unified">${rtl ? "إلغاء" : "Cancel"}</button>
+                <button class="btn btn-outline" id="btn-cancel-unified">${escapeHtml(str.cancel)}</button>
                 <button class="btn btn-primary" id="btn-confirm-unified">${escapeHtml(str.sendReply)}</button>
               </div>
             </div>
@@ -1409,11 +1494,11 @@
         <div class="modal-backdrop">
           <div class="modal-panel">
             <div class="card-title">${escapeHtml(str.compose)}</div>
-            <input id="comp-to" class="field" type="email" placeholder="${rtl ? "إلى (البريد الإلكتروني)" : "Recipient Email"}" />
-            <input id="comp-subj" class="field" placeholder="${rtl ? "الموضوع" : "Subject"}" />
-            <textarea id="comp-body" class="field" rows="4" placeholder="${rtl ? "نص الرسالة" : "Message"}"></textarea>
+            <input id="comp-to" class="field" type="email" placeholder="${escapeHtml(str.recipientEmail)}" />
+            <input id="comp-subj" class="field" placeholder="${escapeHtml(str.subject)}" />
+            <textarea id="comp-body" class="field" rows="4" placeholder="${escapeHtml(str.message)}"></textarea>
             <div class="row-between">
-              <button class="btn btn-outline" id="btn-cancel-compose">${rtl ? "إلغاء" : "Cancel"}</button>
+              <button class="btn btn-outline" id="btn-cancel-compose">${escapeHtml(str.cancel)}</button>
               <button class="btn btn-primary" id="btn-send-compose">${escapeHtml(str.sendReply)}</button>
             </div>
           </div>
@@ -1429,18 +1514,18 @@
         html += `
           <div class="modal-backdrop" id="course-modal-backdrop">
             <div class="modal-panel">
-              <div class="card-title">${escapeHtml(course.code)} — ${escapeHtml(course.title)}</div>
-              <div class="muted">${course.credits} ${rtl ? "ساعات معتمدة" : "Credits"} • ${rtl ? `المرحلة ${course.stage}` : `Stage ${course.stage}`}</div>
-              <div class="muted">${rtl ? "المتطلبات السابقة:" : "Prerequisites:"} ${course.prerequisites.length ? escapeHtml(course.prerequisites.join(", ")) : (rtl ? "لا يوجد" : "None")}</div>
+              <div class="card-title">${escapeHtml(course.code)} — ${escapeHtml(loc(course, "title", "titleAr"))}</div>
+              <div class="muted">${course.credits} ${escapeHtml(str.creditsShort)} • ${escapeHtml(str.stageLabel)} ${course.stage}</div>
+              <div class="muted">${escapeHtml(str.prerequisitesLabel)} ${course.prerequisites.length ? escapeHtml(course.prerequisites.join(", ")) : escapeHtml(str.noneLabel)}</div>
               <div class="branch-grid">
                 ${D.COURSE_STATUSES.map((opt) => `
                   <button class="chip ${curStatus === opt.key ? "selected" : ""}" data-modal-course-status="${opt.key}" data-course-code="${escapeHtml(course.code)}"
                     style="${curStatus === opt.key ? `border-color:${opt.color};background:${opt.color}22;color:${opt.color};` : ""}">
-                    ${escapeHtml(rtl ? opt.labelAr : opt.labelEn)}
+                    ${escapeHtml(ar ? opt.labelAr : opt.labelEn)}
                   </button>
                 `).join("")}
               </div>
-              <button class="btn btn-outline btn-full" id="btn-close-course-modal">${rtl ? "إغلاق" : "Close"}</button>
+              <button class="btn btn-outline btn-full" id="btn-close-course-modal">${escapeHtml(str.close)}</button>
             </div>
           </div>
         `;
@@ -1460,7 +1545,7 @@
                 </button>
               `).join("")}
             </div>
-            <button class="btn btn-outline btn-full" id="btn-close-lang">${rtl ? "إغلاق" : "Close"}</button>
+            <button class="btn btn-outline btn-full" id="btn-close-lang">${escapeHtml(str.close)}</button>
           </div>
         </div>
       `;
@@ -1475,15 +1560,15 @@
               <div class="card-title">${escapeHtml(str.installApp)}</div>
             </div>
             <div class="card" style="background:var(--bg-canvas);">
-              <strong>iPhone / iPad (iOS Safari)</strong>
-              <div class="muted">1. Open UniSync in Safari.<br/>2. Tap the <b>Share</b> button (square with upward arrow).<br/>3. Select <b>Add to Home Screen</b> and tap <b>Add</b>.</div>
+              <strong>${escapeHtml(str.installIosTitle)}</strong>
+              <div class="muted">${str.installIosSteps}</div>
             </div>
             <div class="card" style="background:var(--bg-canvas);">
-              <strong>Android Chrome / Windows / macOS</strong>
-              <div class="muted">Tap the browser menu (⋮) and choose <b>Install App</b> / <b>Add to Home screen</b>.</div>
-              ${state.deferredInstallPrompt ? `<button class="btn btn-primary btn-sm" id="btn-trigger-pwa-install">Install Now</button>` : ""}
+              <strong>${escapeHtml(str.installDesktopTitle)}</strong>
+              <div class="muted">${str.installDesktopSteps}</div>
+              ${state.deferredInstallPrompt ? `<button class="btn btn-primary btn-sm" id="btn-trigger-pwa-install">${escapeHtml(str.installNowBtn)}</button>` : ""}
             </div>
-            <button class="btn btn-outline btn-full" id="btn-close-install">${rtl ? "إغلاق" : "Close"}</button>
+            <button class="btn btn-outline btn-full" id="btn-close-install">${escapeHtml(str.close)}</button>
           </div>
         </div>
       `;
@@ -1494,8 +1579,8 @@
         <div class="modal-backdrop">
           <div class="modal-panel" style="text-align:center;">
             <div style="font-size:2rem;">🏆</div>
-            <div class="card-title">${rtl ? `إنجاز ${state.milestoneAward} دقيقة!` : `${state.milestoneAward}-Minute Milestone!`}</div>
-            <button class="btn btn-primary btn-full" id="btn-dismiss-milestone">${rtl ? "متابعة" : "Continue"}</button>
+            <div class="card-title">${escapeHtml(str.milestoneAchieved.replace("{m}", String(state.milestoneAward)))}</div>
+            <button class="btn btn-primary btn-full" id="btn-dismiss-milestone">${escapeHtml(str.continueLabel)}</button>
           </div>
         </div>
       `;
@@ -1507,9 +1592,9 @@
           <div class="modal-panel" style="text-align:center;">
             <div style="font-size:2.4rem;">🔔</div>
             <div class="badge badge-tag" style="align-self:center;">${escapeHtml(state.ringingEvent.courseCode)}</div>
-            <div class="card-title" style="font-size:1.3rem;">${escapeHtml(state.ringingEvent.title)}</div>
-            <button class="btn btn-tonal btn-full" id="btn-alarm-snooze">${rtl ? "غفوة 5 دقائق" : "Snooze 5 Min"}</button>
-            <button class="btn btn-primary btn-full" id="btn-alarm-dismiss">${rtl ? "إيقاف المنبه" : "Dismiss Alarm"}</button>
+            <div class="card-title" style="font-size:1.3rem;">${escapeHtml(loc(state.ringingEvent, "title", "titleAr"))}</div>
+            <button class="btn btn-tonal btn-full" id="btn-alarm-snooze">${escapeHtml(str.snooze5Min)}</button>
+            <button class="btn btn-primary btn-full" id="btn-alarm-dismiss">${escapeHtml(str.dismissAlarm)}</button>
           </div>
         </div>
       `;
@@ -1661,6 +1746,10 @@
 
           <div class="divider"></div>
 
+          <button class="drawer-item" id="btn-drawer-lang">
+            <span class="drawer-item-left">🌐 <span>${escapeHtml(str.language)}</span></span>
+          </button>
+
           <button class="drawer-item" id="btn-drawer-signout">
             <span class="drawer-item-left">${ICONS.signOut}<span>${escapeHtml(str.signOut)}</span></span>
           </button>
@@ -1677,6 +1766,7 @@
             <h1 class="topbar-title">UniSync</h1>
           </div>
           <div class="topbar-actions">
+            <button class="icon-btn" id="btn-top-lang" aria-label="${escapeHtml(str.language)}">🌐</button>
             <button class="icon-btn" id="btn-top-dark" aria-label="${escapeHtml(str.darkMode)}">${state.darkMode ? ICONS.light : ICONS.dark}</button>
             ${state.role === "student" ? `<button class="icon-btn" id="btn-top-settings" aria-label="${escapeHtml(str.settings)}">${ICONS.settings}</button>` : ""}
           </div>
@@ -1685,7 +1775,7 @@
 
       <div class="workspace-body">
         ${!locked ? `
-          <nav class="nav-rail" aria-label="Main navigation">
+          <nav class="nav-rail" aria-label="${escapeHtml(str.menu)}">
             ${navItems.map((it) => `
               <button class="nav-item ${activeKey === it.key ? "active" : ""}" data-nav-key="${it.key}">
                 <span class="nav-pill">${it.icon}</span>
@@ -1701,7 +1791,7 @@
       </div>
 
       ${!locked ? `
-        <nav class="bottom-nav" aria-label="Bottom navigation">
+        <nav class="bottom-nav" aria-label="${escapeHtml(str.menu)}">
           ${navItems.map((it) => `
             <button class="nav-item ${activeKey === it.key ? "active" : ""}" data-nav-key="${it.key}">
               <span class="nav-pill">${it.icon}</span>
@@ -1724,6 +1814,7 @@
 
   // --- Event Binding ---
   function bindEvents() {
+    const str = D.getStrings(state.languageCode);
     const on = (id, ev, fn) => {
       const el = document.getElementById(id);
       if (el) el.addEventListener(ev, fn);
@@ -1747,7 +1838,7 @@
       const nameVal = (document.getElementById("academic-name-input").value || "").trim();
       const emailVal = (document.getElementById("academic-email-input").value || "").trim();
       if (!emailVal || !emailVal.includes("@")) {
-        showToast("Please enter a valid university email");
+        showToast(str.toastInvalidEmail);
         return;
       }
       state.session = {
@@ -1761,9 +1852,10 @@
       render();
     });
     on("btn-demo-login", "click", () => {
+      const ar = isArabic();
       state.session = {
         mode: "demo",
-        name: state.role === "instructor" ? "Dr. Tariq Al-Mansoor" : "Sohaila Ahmad",
+        name: state.role === "instructor" ? (ar ? "د. طارق المنصور" : "Dr. Tariq Al-Mansoor") : (ar ? "سُهيلة أحمد" : "Sohaila Ahmad"),
         email: state.role === "instructor" ? "t.almansoor@aou.edu.sa" : "2341098@aou.edu.sa"
       };
       state.emails = D.getSampleEmails(state.role);
@@ -1776,9 +1868,11 @@
     on("btn-open-drawer", "click", () => { state.drawerOpen = true; render(); });
     on("drawer-backdrop", "click", (e) => { if (e.target.id === "drawer-backdrop") { state.drawerOpen = false; render(); } });
     on("btn-drawer-history", "click", () => { state.showRepliedReviewed = true; state.drawerOpen = false; render(); });
+    on("btn-drawer-lang", "click", () => { state.drawerOpen = false; state.showLangModal = true; render(); });
     on("btn-close-history", "click", () => { state.showRepliedReviewed = false; render(); });
     on("btn-drawer-signout", "click", signOut);
     on("btn-sign-out", "click", signOut);
+    on("btn-top-lang", "click", () => { state.showLangModal = true; render(); });
     on("btn-top-dark", "click", () => { state.darkMode = !state.darkMode; persist(); render(); });
     on("btn-top-settings", "click", () => {
       state.showRepliedReviewed = false;
@@ -1847,7 +1941,7 @@
     on("btn-extract-dates", "click", () => {
       const email = state.emails.find((e) => e.id === state.selectedEmailId);
       if (!email) return;
-      const items = D.extractDates(email);
+      const items = D.extractDates(email, state.languageCode);
       items.forEach((it, idx) => {
         state.calendarEvents.push({
           id: "cal_" + Date.now() + "_" + idx,
@@ -1859,7 +1953,7 @@
         });
       });
       persist();
-      showToast(`Added ${items.length} date(s) to Calendar & Smart Alarm`);
+      showToast(str.toastDatesAdded);
     });
     document.querySelectorAll("[data-tone-reply]").forEach((btn) => {
       btn.addEventListener("click", () => { state.replyTone = btn.getAttribute("data-tone-reply"); render(); });
@@ -1896,7 +1990,7 @@
       state.smartReplyDraft = "";
       persist();
       render();
-      showToast(`Reply sent to ${email.senderName}`);
+      showToast(`${str.toastReplySent} ${loc(email, "senderName", "senderNameAr")}`);
     });
 
     // Compose Modal
@@ -1923,12 +2017,14 @@
       }
       state.emails.unshift({
         id: "sent_" + Date.now(),
-        senderName: "You (Sent)",
+        senderName: str.youSent,
+        senderNameAr: str.youSent,
         senderEmail: state.session.email,
         recipientEmail: to,
         subject: subj,
         fullBody: body,
-        receivedAtLabel: "Just now",
+        receivedAtLabel: str.justNow,
+        receivedAtAr: str.justNow,
         timestampMillis: Date.now(),
         priority: "NORMAL",
         courseTag: "OUTBOX",
@@ -1939,7 +2035,7 @@
       state.showComposeModal = false;
       persist();
       render();
-      showToast(`Email sent to ${to}`);
+      showToast(`${str.toastEmailSent} ${to}`);
     });
 
     // Instructor Unified Reply (Hides cluster immediately & adds to Replied & Reviewed)
@@ -1947,9 +2043,8 @@
       const cid = e.currentTarget.getAttribute("data-cluster-id");
       const cluster = D.REPEATED_QUESTIONS.find((c) => c.id === cid);
       if (!cluster) return;
-      const rtl = D.isRtl(state.languageCode);
       state.unifiedReplyClusterId = cid;
-      state.unifiedReplyText = rtl
+      state.unifiedReplyText = isArabic()
         ? `أعزائي طلاب مقرر ${cluster.courseCode}،\n\nبخصوص «${cluster.topicAr}»: يُرجى الالتزام بالدليل المحدّث للمقرر وتعليمات التسليم على نظام إدارة التعلم (LMS).\n\nمع أطيب التحيات،\nعضو هيئة التدريس`
         : `Dear ${cluster.courseCode} Students,\n\nRegarding "${cluster.topic}": Please follow the updated course guide and submission instructions on the AOU LMS.\n\nBest regards,\nCourse Instructor`;
       render();
@@ -1974,7 +2069,7 @@
       state.unifiedReplyClusterId = null;
       persist();
       render();
-      showToast(`Unified reply sent to ${cluster.askCount} students`);
+      showToast(`${str.toastUnifiedSent} (${cluster.askCount})`);
     });
 
     // Roadmaps Pan/Zoom + Course Status
@@ -2091,7 +2186,7 @@
       state.calendarEvents.sort((a, b) => a.eventTimeMillis - b.eventTimeMillis);
       persist();
       render();
-      showToast("Event & Smart Alarm saved");
+      showToast(str.toastEventSaved);
     });
     document.querySelectorAll("[data-toggle-alarm]").forEach((btn) => {
       btn.addEventListener("click", () => {
@@ -2180,7 +2275,7 @@
       });
       persist();
       render();
-      showToast("Material published");
+      showToast(str.toastMaterialPublished);
     });
     document.querySelectorAll("[data-del-mat]").forEach((btn) => {
       btn.addEventListener("click", () => {
@@ -2200,9 +2295,8 @@
       const q = (document.getElementById("study-ask-input").value || "").trim();
       if (!q) return;
       state.studyMessages.push({ user: true, text: q });
-      const rtl = D.isRtl(state.languageCode);
-      const ans = rtl
-        ? `خطة مذاكرة سريعة حول «${q}»:\n1. مراجعة المفهوم الأساسي في دليل المقرر.\n2. تطبيق عملي عبر جلسة بومودورو مركزة (25 دقيقة) دون تشتيت.\n3. حل مسألتين من نماذج الاختبارات السابقة.`
+      const ans = isArabic()
+        ? `خطة دراسة سريعة حول «${q}»:\n1. مراجعة المفهوم الأساسي في دليل المقرر.\n2. تطبيق عملي عبر جلسة بومودورو مركزة (25 دقيقة) دون تشتيت.\n3. حل مسألتين من نماذج الاختبارات السابقة.`
         : `Focused Study Plan for "${q}":\n1. Review core concept definitions in the AOU course guide.\n2. Run one distraction-free 25-minute Pomodoro sprint to summarize key steps.\n3. Solve two past TMA/MTA practice problems.`;
       state.studyMessages.push({ user: false, text: ans });
       render();
@@ -2235,7 +2329,7 @@
       state.manualNotes.unshift({ id: "note_" + Date.now(), title, course, body, url });
       persist();
       render();
-      showToast("Note saved");
+      showToast(str.toastNoteSaved);
     });
     document.querySelectorAll("[data-del-note]").forEach((btn) => {
       btn.addEventListener("click", () => {
@@ -2262,11 +2356,7 @@
     on("btn-close-lang", "click", () => { state.showLangModal = false; render(); });
     document.querySelectorAll("[data-choose-lang]").forEach((btn) => {
       btn.addEventListener("click", () => {
-        state.languageCode = btn.getAttribute("data-choose-lang");
-        state.showLangModal = false;
-        state.showOriginalEmail = false;
-        persist();
-        render();
+        setLanguage(btn.getAttribute("data-choose-lang"));
       });
     });
     document.querySelectorAll("[data-select-branch]").forEach((btn) => {
@@ -2299,7 +2389,6 @@
     render();
   }
 
-  // PWA Service Worker & Install Prompt Registration
   window.addEventListener("beforeinstallprompt", (e) => {
     e.preventDefault();
     state.deferredInstallPrompt = e;
@@ -2312,5 +2401,7 @@
     });
   }
 
+  // Sync URL query language on startup (defaults to Arabic 'ar')
+  syncUrlLanguage(state.languageCode);
   handleMicrosoftCallbackIfPresent().then(render);
 })();
