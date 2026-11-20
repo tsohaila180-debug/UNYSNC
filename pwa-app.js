@@ -646,9 +646,38 @@
     signOut: `<svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M17 7l-1.41 1.41L18.17 11H8v2h10.17l-2.58 2.58L17 17l5-5zM4 5h8V3H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h8v-2H4V5z"/></svg>`
   };
 
-  function renderPriorityBadge(priority) {
+  function getPriorityLabel(priority, str) {
+    const s = str || D.getStrings(state.languageCode);
+    if (priority === "CRITICAL") return s.priorityCritical;
+    if (priority === "HIGH") return s.priorityHigh;
+    if (priority === "LOW") return s.priorityLow;
+    return s.priorityNormal;
+  }
+
+  function renderPriorityBadge(priority, str) {
     const meta = D.PRIORITY_META[priority] || D.PRIORITY_META.NORMAL;
-    return `<span class="badge ${meta.badgeClass}">${escapeHtml(isArabic() ? meta.labelAr : meta.labelEn)}</span>`;
+    return `<span class="badge ${meta.badgeClass}">${escapeHtml(getPriorityLabel(priority, str))}</span>`;
+  }
+
+  function getCourseStatusLabel(key, str) {
+    const s = str || D.getStrings(state.languageCode);
+    if (key === "completed") return s.statusCompleted;
+    if (key === "in_progress") return s.statusInProgress;
+    if (key === "next_term") return s.statusNextTerm;
+    return s.statusNotStarted;
+  }
+
+  function getCourseStatusShort(key, str) {
+    const s = str || D.getStrings(state.languageCode);
+    if (key === "completed") return s.statusCompletedShort;
+    if (key === "in_progress") return s.statusInProgressShort;
+    if (key === "next_term") return s.statusNextTermShort;
+    return s.statusNotStartedShort;
+  }
+
+  function getMajorName(m, str) {
+    const s = str || D.getStrings(state.languageCode);
+    return s["major_" + m.id] || (isArabic() ? m.nameAr : m.nameEn);
   }
 
   function renderUrgentEmailBanner(str) {
@@ -813,7 +842,7 @@
             </div>
             <div style="font-weight:600;font-size:0.94rem;">${escapeHtml(adapted.subject)}</div>
             <div class="row-between">
-              ${renderPriorityBadge(email.priority)}
+              ${renderPriorityBadge(email.priority, str)}
               <span class="badge badge-tag">${escapeHtml(email.courseTag)}</span>
             </div>
           </div>
@@ -852,7 +881,7 @@
 
           <div class="card">
             <div class="row-between">
-              ${renderPriorityBadge(email.priority)}
+              ${renderPriorityBadge(email.priority, str)}
               <span class="badge badge-tag">${escapeHtml(email.courseTag)}</span>
             </div>
             <div class="card-title" style="font-size:1.1rem;">${escapeHtml(subject)}</div>
@@ -915,8 +944,7 @@
       <div class="row-scroll">
         <button class="chip ${!state.priorityFilter ? "selected" : ""}" data-prio-filter="ALL">${escapeHtml(str.all)}</button>
         ${["CRITICAL", "HIGH", "NORMAL", "LOW"].map((p) => {
-          const meta = D.PRIORITY_META[p];
-          return `<button class="chip ${state.priorityFilter === p ? "selected" : ""}" data-prio-filter="${p}">${escapeHtml(isArabic() ? meta.labelAr : meta.labelEn)}</button>`;
+          return `<button class="chip ${state.priorityFilter === p ? "selected" : ""}" data-prio-filter="${p}">${escapeHtml(getPriorityLabel(p, str))}</button>`;
         }).join("")}
       </div>
 
@@ -931,7 +959,7 @@
             <div style="font-weight:${email.unread ? 700 : 500};font-size:0.95rem;">${escapeHtml(adapted.subject)}</div>
             <div class="row-between">
               <div class="row-wrap">
-                ${renderPriorityBadge(email.priority)}
+                ${renderPriorityBadge(email.priority, str)}
                 ${email.replied ? `<span class="badge badge-success">✓</span>` : ""}
               </div>
               <span class="badge badge-tag">${escapeHtml(email.courseTag)}</span>
@@ -988,7 +1016,7 @@
               </div>
               <div style="font-weight:600;">${escapeHtml(adapted.subject)}</div>
               <div class="row-between">
-                ${renderPriorityBadge(email.priority)}
+                ${renderPriorityBadge(email.priority, str)}
                 <span class="muted" style="font-size:0.76rem;">${escapeHtml(email.courseTag)} • ${escapeHtml(loc(email, "receivedAtLabel", "receivedAtAr"))}</span>
               </div>
               ${replySaved ? `<div class="muted" style="padding:8px;border-radius:8px;background:var(--bg-canvas);border:1px solid var(--border-card);">${escapeHtml(replySaved)}</div>` : ""}
@@ -1000,7 +1028,6 @@
   }
 
   function renderRoadmapsScreen(str) {
-    const ar = isArabic();
     const major = D.MAJORS.find((m) => m.id === state.selectedMajorId) || D.MAJORS[0];
     const completedCount = major.courses.filter((c) => state.courseStatuses[c.code] === "completed").length;
     const totalCount = major.courses.length;
@@ -1022,7 +1049,7 @@
       <div class="row-scroll">
         ${D.MAJORS.map((m) => `
           <button class="chip ${m.id === major.id ? "selected" : ""}" data-select-major="${m.id}">
-            ${escapeHtml(ar ? m.nameAr : m.nameEn)}
+            ${escapeHtml(getMajorName(m, str))}
           </button>
         `).join("")}
       </div>
@@ -1037,7 +1064,7 @@
         </div>
         <div class="row-wrap">
           ${D.COURSE_STATUSES.map((s) => `
-            <span class="badge" style="background:${s.color}22;color:${s.color};">${escapeHtml(ar ? s.labelAr : s.labelEn)}</span>
+            <span class="badge" style="background:${s.color}22;color:${s.color};">${escapeHtml(getCourseStatusLabel(s.key, str))}</span>
           `).join("")}
         </div>
       </div>
@@ -1063,12 +1090,12 @@
                           <div style="font-weight:600;font-size:0.78rem;line-height:1.25;margin-top:4px;">${escapeHtml(loc(course, "title", "titleAr"))}</div>
                         </div>
                         <div>
-                          <div style="font-size:0.7rem;font-weight:700;color:${stMeta.color};">${escapeHtml(ar ? stMeta.labelAr : stMeta.labelEn)}</div>
+                          <div style="font-size:0.7rem;font-weight:700;color:${stMeta.color};">${escapeHtml(getCourseStatusLabel(stMeta.key, str))}</div>
                           <div class="course-node-status-bar">
                             ${D.COURSE_STATUSES.map((opt) => `
                               <button class="status-dot-btn" data-set-course="${escapeHtml(course.code)}" data-status="${opt.key}"
                                 style="${stKey === opt.key ? `background:${opt.color};color:#fff;border-color:${opt.color};` : ""}">
-                                ${escapeHtml(ar ? opt.shortAr : opt.shortEn)}
+                                ${escapeHtml(getCourseStatusShort(opt.key, str))}
                               </button>
                             `).join("")}
                           </div>
@@ -1406,7 +1433,7 @@
           ${state.voiceNotes.map((v) => `
             <div class="card">
               <div class="row-between">
-                <div><strong>${escapeHtml(v.title)}</strong><div class="muted">${v.durationSec}s</div></div>
+                <div><strong>${escapeHtml(v.title)}</strong><div class="muted">${v.durationSec}${escapeHtml(str.secondsShort)}</div></div>
                 <button class="btn btn-tonal btn-sm" data-play-voice="${escapeHtml(v.id)}">${state.playingVoiceId === v.id ? "⏸" : "▶"}</button>
               </div>
             </div>
@@ -1467,7 +1494,6 @@
 
   // --- Modals & Overlays ---
   function renderModals(str) {
-    const ar = isArabic();
     let html = "";
 
     if (state.unifiedReplyClusterId) {
@@ -1521,7 +1547,7 @@
                 ${D.COURSE_STATUSES.map((opt) => `
                   <button class="chip ${curStatus === opt.key ? "selected" : ""}" data-modal-course-status="${opt.key}" data-course-code="${escapeHtml(course.code)}"
                     style="${curStatus === opt.key ? `border-color:${opt.color};background:${opt.color}22;color:${opt.color};` : ""}">
-                    ${escapeHtml(ar ? opt.labelAr : opt.labelEn)}
+                    ${escapeHtml(getCourseStatusLabel(opt.key, str))}
                   </button>
                 `).join("")}
               </div>
@@ -2044,9 +2070,9 @@
       const cluster = D.REPEATED_QUESTIONS.find((c) => c.id === cid);
       if (!cluster) return;
       state.unifiedReplyClusterId = cid;
-      state.unifiedReplyText = isArabic()
-        ? `أعزائي طلاب مقرر ${cluster.courseCode}،\n\nبخصوص «${cluster.topicAr}»: يُرجى الالتزام بالدليل المحدّث للمقرر وتعليمات التسليم على نظام إدارة التعلم (LMS).\n\nمع أطيب التحيات،\nعضو هيئة التدريس`
-        : `Dear ${cluster.courseCode} Students,\n\nRegarding "${cluster.topic}": Please follow the updated course guide and submission instructions on the AOU LMS.\n\nBest regards,\nCourse Instructor`;
+      state.unifiedReplyText = str.unifiedReplyTemplate
+        .replace("{course}", cluster.courseCode)
+        .replace("{topic}", loc(cluster, "topic", "topicAr"));
       render();
     });
     on("btn-cancel-unified", "click", () => { state.unifiedReplyClusterId = null; render(); });
@@ -2295,9 +2321,7 @@
       const q = (document.getElementById("study-ask-input").value || "").trim();
       if (!q) return;
       state.studyMessages.push({ user: true, text: q });
-      const ans = isArabic()
-        ? `خطة دراسة سريعة حول «${q}»:\n1. مراجعة المفهوم الأساسي في دليل المقرر.\n2. تطبيق عملي عبر جلسة بومودورو مركزة (25 دقيقة) دون تشتيت.\n3. حل مسألتين من نماذج الاختبارات السابقة.`
-        : `Focused Study Plan for "${q}":\n1. Review core concept definitions in the AOU course guide.\n2. Run one distraction-free 25-minute Pomodoro sprint to summarize key steps.\n3. Solve two past TMA/MTA practice problems.`;
+      const ans = str.studyPlanTemplate.replace("{q}", q);
       state.studyMessages.push({ user: false, text: ans });
       render();
     });
