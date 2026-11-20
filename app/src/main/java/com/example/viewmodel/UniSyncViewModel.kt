@@ -185,7 +185,7 @@ class UniSyncViewModel(
 
     fun startDemoSession(role: UserRole) {
         viewModelScope.launch { preferencesRepo.setRole(role) }
-        val demoName = if (role == UserRole.INSTRUCTOR) "Dr. Tariq Al-Mansoor" else "Sohaila Ahmad"
+        val demoName = if (role == UserRole.INSTRUCTOR) "Dr. Tariq Al-Mansoor" else "Noura Al-Mansoor"
         val demoEmail = if (role == UserRole.INSTRUCTOR) "t.almansoor@aou.edu.kw" else "2341098@aou.edu.kw"
         _uiState.update {
             it.copy(

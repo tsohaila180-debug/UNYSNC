@@ -746,12 +746,6 @@
 
           <div class="divider"></div>
 
-          <input id="academic-name-input" class="field" placeholder="${escapeHtml(str.fullNameOptional)}" />
-          <input id="academic-email-input" class="field" type="email" placeholder="${escapeHtml(str.universityEmailPlaceholder)}" />
-          <button class="btn btn-tonal btn-full" id="btn-academic-login">
-            ${escapeHtml(str.signInAcademic)}
-          </button>
-
           <button class="btn btn-outline btn-full" id="btn-demo-login">
             ${escapeHtml(str.demoAccount)} (${state.role === "instructor" ? escapeHtml(str.instructorRole) : escapeHtml(str.studentRole)})
           </button>
@@ -1860,28 +1854,11 @@
     on("login-lang-btn", "click", () => { state.showLangModal = true; render(); });
     on("login-dark-btn", "click", () => { state.darkMode = !state.darkMode; persist(); render(); });
     on("btn-ms-login", "click", startMicrosoftLogin);
-    on("btn-academic-login", "click", () => {
-      const nameVal = (document.getElementById("academic-name-input").value || "").trim();
-      const emailVal = (document.getElementById("academic-email-input").value || "").trim();
-      if (!emailVal || !emailVal.includes("@")) {
-        showToast(str.toastInvalidEmail);
-        return;
-      }
-      state.session = {
-        mode: "academic",
-        name: nameVal || emailVal.split("@")[0],
-        email: emailVal
-      };
-      state.emails = D.getSampleEmails(state.role);
-      state.calendarEvents = D.getDefaultCalendarEvents(state.role);
-      persist();
-      render();
-    });
     on("btn-demo-login", "click", () => {
       const ar = isArabic();
       state.session = {
         mode: "demo",
-        name: state.role === "instructor" ? (ar ? "د. طارق المنصور" : "Dr. Tariq Al-Mansoor") : (ar ? "سُهيلة أحمد" : "Sohaila Ahmad"),
+        name: state.role === "instructor" ? (ar ? "د. طارق المنصور" : "Dr. Tariq Al-Mansoor") : (ar ? "نورة المنصور" : "Noura Al-Mansoor"),
         email: state.role === "instructor" ? "t.almansoor@aou.edu.sa" : "2341098@aou.edu.sa"
       };
       state.emails = D.getSampleEmails(state.role);

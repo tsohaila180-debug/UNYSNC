@@ -53,8 +53,8 @@ test("User profile: owner create, partial update, and cross-user isolation", asy
   await assertSucceeds(
     alice.collection("users").doc(ALICE_UID).set({
       userId: ALICE_UID,
-      displayName: "Sohaila",
-      email: "sohaila@aou.edu.kw",
+      displayName: "Noura Al-Mansoor",
+      email: "noura@aou.edu.sa",
       role: "student",
       aouBranch: "Kuwait",
       majorId: "cs",
@@ -177,7 +177,7 @@ test("Dual chat messages: general and participant-scoped direct queries work and
   await assertSucceeds(
     alice.collection("chatMessages").doc("msg_gen_1").set({
       senderId: ALICE_UID,
-      senderName: "Sohaila",
+      senderName: "Noura Al-Mansoor",
       senderRole: "student",
       channel: "general",
       participants: [],
@@ -190,7 +190,7 @@ test("Dual chat messages: general and participant-scoped direct queries work and
   await assertSucceeds(
     alice.collection("chatMessages").doc("msg_dir_1").set({
       senderId: ALICE_UID,
-      senderName: "Sohaila",
+      senderName: "Noura Al-Mansoor",
       senderRole: "student",
       channel: "direct",
       participants: [ALICE_UID, BOB_UID],
