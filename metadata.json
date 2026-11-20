@@ -1,0 +1,6 @@
+{
+  "name": "UniSync",
+  "description": "Cross-platform academic management app for Arab Open University (AOU) students and faculty.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,131 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Authenticated UniSync user profile and workspace preferences.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "displayName": { "type": "string" },
+        "email": { "type": "string" },
+        "role": { "type": "string", "enum": ["student", "instructor"] },
+        "aouBranch": { "type": "string" },
+        "majorId": { "type": "string" },
+        "companionGender": { "type": "string", "enum": ["girl", "boy"] },
+        "fontScale": { "type": "string", "enum": ["medium", "large", "xlarge"] },
+        "darkMode": { "type": "boolean" },
+        "languageCode": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "displayName", "role", "createdAt", "updatedAt"]
+    },
+    "CourseProgress": {
+      "title": "CourseProgress",
+      "description": "Student interactive course completion status across AOU major roadmaps.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "courseCode": { "type": "string" },
+        "majorId": { "type": "string" },
+        "status": { "type": "string", "enum": ["completed", "in_progress", "next_term", "not_started"] },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "courseCode", "majorId", "status", "updatedAt"]
+    },
+    "CalendarEvent": {
+      "title": "CalendarEvent",
+      "description": "User academic event and smart alarm entry.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "title": { "type": "string" },
+        "courseCode": { "type": "string" },
+        "category": { "type": "string", "enum": ["lecture", "exam", "assignment", "office_hour", "personal"] },
+        "eventTimeMillis": { "type": "integer" },
+        "alarmEnabled": { "type": "boolean" },
+        "ringtoneId": { "type": "string" },
+        "source": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "title", "category", "eventTimeMillis", "alarmEnabled", "createdAt", "updatedAt"]
+    },
+    "ManualNote": {
+      "title": "ManualNote",
+      "description": "Student manually entered study note or material link.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "title": { "type": "string" },
+        "content": { "type": "string" },
+        "linkUrl": { "type": "string" },
+        "courseTag": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "title", "content", "createdAt", "updatedAt"]
+    },
+    "FacultyMaterial": {
+      "title": "FacultyMaterial",
+      "description": "Lecture material or online link uploaded by an instructor.",
+      "type": "object",
+      "properties": {
+        "authorId": { "type": "string" },
+        "authorName": { "type": "string" },
+        "courseCode": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "resourceUrl": { "type": "string" },
+        "materialType": { "type": "string", "enum": ["slides", "link", "recording", "assignment"] },
+        "published": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["authorId", "authorName", "courseCode", "title", "materialType", "published", "createdAt", "updatedAt"]
+    },
+    "ChatMessage": {
+      "title": "ChatMessage",
+      "description": "UniSync chat message for Direct Student-Instructor Chat or General Student Chat.",
+      "type": "object",
+      "properties": {
+        "senderId": { "type": "string" },
+        "senderName": { "type": "string" },
+        "senderRole": { "type": "string", "enum": ["student", "instructor"] },
+        "channel": { "type": "string", "enum": ["direct", "general"] },
+        "participants": { "type": "array" },
+        "courseTag": { "type": "string" },
+        "text": { "type": "string" },
+        "attachmentBase64": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["senderId", "senderName", "senderRole", "channel", "participants", "text", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Owner-only user profile and settings."
+    },
+    "/users/{userId}/courseProgress/{courseCode}": {
+      "schema": { "$ref": "#/entities/CourseProgress" },
+      "description": "Owner-only AOU roadmap course progress."
+    },
+    "/users/{userId}/calendarEvents/{eventId}": {
+      "schema": { "$ref": "#/entities/CalendarEvent" },
+      "description": "Owner-only calendar events and smart alarms."
+    },
+    "/users/{userId}/manualNotes/{noteId}": {
+      "schema": { "$ref": "#/entities/ManualNote" },
+      "description": "Owner-only student manual materials and writing space."
+    },
+    "/materials/{materialId}": {
+      "schema": { "$ref": "#/entities/FacultyMaterial" },
+      "description": "Published faculty lecture materials and links."
+    },
+    "/chatMessages/{messageId}": {
+      "schema": { "$ref": "#/entities/ChatMessage" },
+      "description": "General student chat and participant-scoped direct student-instructor chat."
+    }
+  }
+}

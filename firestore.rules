@@ -1,0 +1,209 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidUserProfile(data, userId) {
+      return data.userId is string &&
+             data.userId == userId &&
+             data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 100 &&
+             (!('email' in data) || (data.email is string && data.email.size() <= 150)) &&
+             data.role in ['student', 'instructor'] &&
+             (!('aouBranch' in data) || (data.aouBranch is string && data.aouBranch.size() <= 80)) &&
+             (!('majorId' in data) || (data.majorId is string && data.majorId.size() <= 80)) &&
+             (!('companionGender' in data) || data.companionGender in ['girl', 'boy']) &&
+             (!('fontScale' in data) || data.fontScale in ['medium', 'large', 'xlarge']) &&
+             (!('darkMode' in data) || data.darkMode is bool) &&
+             (!('languageCode' in data) || (data.languageCode is string && data.languageCode.size() <= 16)) &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidCourseProgress(data, userId, courseCode) {
+      return data.userId is string &&
+             data.userId == userId &&
+             data.courseCode is string && data.courseCode == courseCode &&
+             data.majorId is string && data.majorId.size() >= 1 && data.majorId.size() <= 80 &&
+             data.status in ['completed', 'in_progress', 'next_term', 'not_started'] &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidCalendarEvent(data, userId) {
+      return data.userId is string &&
+             data.userId == userId &&
+             data.title is string && data.title.size() >= 1 && data.title.size() <= 160 &&
+             (!('courseCode' in data) || (data.courseCode is string && data.courseCode.size() <= 32)) &&
+             data.category in ['lecture', 'exam', 'assignment', 'office_hour', 'personal'] &&
+             data.eventTimeMillis is int && data.eventTimeMillis > 0 &&
+             data.alarmEnabled is bool &&
+             (!('ringtoneId' in data) || (data.ringtoneId is string && data.ringtoneId.size() <= 40)) &&
+             (!('source' in data) || (data.source is string && data.source.size() <= 40)) &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidManualNote(data, userId) {
+      return data.userId is string &&
+             data.userId == userId &&
+             data.title is string && data.title.size() >= 1 && data.title.size() <= 160 &&
+             data.content is string && data.content.size() <= 4000 &&
+             (!('linkUrl' in data) || (data.linkUrl is string && data.linkUrl.size() <= 500)) &&
+             (!('courseTag' in data) || (data.courseTag is string && data.courseTag.size() <= 32)) &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidFacultyMaterial(data) {
+      return data.authorId is string &&
+             data.authorId == request.auth.uid &&
+             data.authorName is string && data.authorName.size() >= 1 && data.authorName.size() <= 100 &&
+             data.courseCode is string && data.courseCode.size() >= 2 && data.courseCode.size() <= 32 &&
+             data.title is string && data.title.size() >= 1 && data.title.size() <= 180 &&
+             (!('description' in data) || (data.description is string && data.description.size() <= 1000)) &&
+             (!('resourceUrl' in data) || (data.resourceUrl is string && data.resourceUrl.size() <= 600)) &&
+             data.materialType in ['slides', 'link', 'recording', 'assignment'] &&
+             data.published is bool &&
+             data.createdAt is timestamp && data.createdAt <= request.time &&
+             data.updatedAt is timestamp && data.updatedAt <= request.time;
+    }
+
+    function isValidChatMessage(data) {
+      return data.senderId is string &&
+             data.senderId == request.auth.uid &&
+             data.senderName is string && data.senderName.size() >= 1 && data.senderName.size() <= 100 &&
+             data.senderRole in ['student', 'instructor'] &&
+             data.channel in ['direct', 'general'] &&
+             data.participants is list && data.participants.size() <= 2 &&
+             (data.participants.size() == 0 || data.participants[0] is string) &&
+             (data.channel == 'general' || request.auth.uid in data.participants) &&
+             (!('courseTag' in data) || (data.courseTag is string && data.courseTag.size() <= 32)) &&
+             data.text is string && data.text.size() <= 2000 &&
+             (!('attachmentBase64' in data) || (data.attachmentBase64 is string && data.attachmentBase64.size() <= 350000)) &&
+             data.createdAt is timestamp && data.createdAt <= request.time;
+    }
+
+    match /users/{userId} {
+      allow get, list: if isOwner(userId);
+      allow create: if isOwner(userId) &&
+                       isValidId(userId) &&
+                       incoming().keys().hasAll(['userId', 'displayName', 'role', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['userId', 'displayName', 'email', 'role', 'aouBranch', 'majorId', 'companionGender', 'fontScale', 'darkMode', 'languageCode', 'createdAt', 'updatedAt']) &&
+                       isValidUserProfile(incoming(), userId);
+      allow update: if isOwner(userId) &&
+                       isValidId(userId) &&
+                       incoming().userId == existing().userId &&
+                       incoming().createdAt == existing().createdAt &&
+                       isValidUserProfile(incoming(), userId) &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'email', 'role', 'aouBranch', 'majorId', 'companionGender', 'fontScale', 'darkMode', 'languageCode', 'updatedAt']);
+      allow delete: if isOwner(userId);
+
+      match /courseProgress/{courseCode} {
+        allow get: if isOwner(userId) && isValidId(courseCode);
+        allow list: if isOwner(userId);
+        allow create: if isOwner(userId) &&
+                         isValidId(courseCode) &&
+                         incoming().keys().hasAll(['userId', 'courseCode', 'majorId', 'status', 'updatedAt']) &&
+                         incoming().keys().hasOnly(['userId', 'courseCode', 'majorId', 'status', 'updatedAt']) &&
+                         isValidCourseProgress(incoming(), userId, courseCode);
+        allow update: if isOwner(userId) &&
+                         isValidId(courseCode) &&
+                         incoming().userId == existing().userId &&
+                         incoming().courseCode == existing().courseCode &&
+                         isValidCourseProgress(incoming(), userId, courseCode) &&
+                         incoming().diff(existing()).affectedKeys().hasOnly(['majorId', 'status', 'updatedAt']);
+        allow delete: if isOwner(userId) && isValidId(courseCode);
+      }
+
+      match /calendarEvents/{eventId} {
+        allow get: if isOwner(userId) && isValidId(eventId);
+        allow list: if isOwner(userId);
+        allow create: if isOwner(userId) &&
+                         isValidId(eventId) &&
+                         incoming().keys().hasAll(['userId', 'title', 'category', 'eventTimeMillis', 'alarmEnabled', 'createdAt', 'updatedAt']) &&
+                         incoming().keys().hasOnly(['userId', 'title', 'courseCode', 'category', 'eventTimeMillis', 'alarmEnabled', 'ringtoneId', 'source', 'createdAt', 'updatedAt']) &&
+                         isValidCalendarEvent(incoming(), userId);
+        allow update: if isOwner(userId) &&
+                         isValidId(eventId) &&
+                         incoming().userId == existing().userId &&
+                         incoming().createdAt == existing().createdAt &&
+                         isValidCalendarEvent(incoming(), userId) &&
+                         incoming().diff(existing()).affectedKeys().hasOnly(['title', 'courseCode', 'category', 'eventTimeMillis', 'alarmEnabled', 'ringtoneId', 'source', 'updatedAt']);
+        allow delete: if isOwner(userId) && isValidId(eventId);
+      }
+
+      match /manualNotes/{noteId} {
+        allow get: if isOwner(userId) && isValidId(noteId);
+        allow list: if isOwner(userId);
+        allow create: if isOwner(userId) &&
+                         isValidId(noteId) &&
+                         incoming().keys().hasAll(['userId', 'title', 'content', 'createdAt', 'updatedAt']) &&
+                         incoming().keys().hasOnly(['userId', 'title', 'content', 'linkUrl', 'courseTag', 'createdAt', 'updatedAt']) &&
+                         isValidManualNote(incoming(), userId);
+        allow update: if isOwner(userId) &&
+                         isValidId(noteId) &&
+                         incoming().userId == existing().userId &&
+                         incoming().createdAt == existing().createdAt &&
+                         isValidManualNote(incoming(), userId) &&
+                         incoming().diff(existing()).affectedKeys().hasOnly(['title', 'content', 'linkUrl', 'courseTag', 'updatedAt']);
+        allow delete: if isOwner(userId) && isValidId(noteId);
+      }
+    }
+
+    match /materials/{materialId} {
+      allow get: if isSignedIn() && isValidId(materialId) && existing().published == true;
+      allow list: if isSignedIn() && existing().published == true;
+      allow create: if isSignedIn() &&
+                       isValidId(materialId) &&
+                       incoming().keys().hasAll(['authorId', 'authorName', 'courseCode', 'title', 'materialType', 'published', 'createdAt', 'updatedAt']) &&
+                       incoming().keys().hasOnly(['authorId', 'authorName', 'courseCode', 'title', 'description', 'resourceUrl', 'materialType', 'published', 'createdAt', 'updatedAt']) &&
+                       isValidFacultyMaterial(incoming());
+      allow update: if isSignedIn() &&
+                       isValidId(materialId) &&
+                       existing().authorId == request.auth.uid &&
+                       incoming().authorId == existing().authorId &&
+                       incoming().createdAt == existing().createdAt &&
+                       isValidFacultyMaterial(incoming()) &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['authorName', 'courseCode', 'title', 'description', 'resourceUrl', 'materialType', 'published', 'updatedAt']);
+      allow delete: if isSignedIn() && isValidId(materialId) && existing().authorId == request.auth.uid;
+    }
+
+    match /chatMessages/{messageId} {
+      allow get: if isSignedIn() &&
+                    isValidId(messageId) &&
+                    (existing().channel == 'general' ||
+                     (existing().channel == 'direct' && request.auth.uid in existing().participants));
+      allow list: if isSignedIn() &&
+                     (existing().channel == 'general' ||
+                      (existing().channel == 'direct' && request.auth.uid in existing().participants));
+      allow create: if isSignedIn() &&
+                       isValidId(messageId) &&
+                       incoming().keys().hasAll(['senderId', 'senderName', 'senderRole', 'channel', 'participants', 'text', 'createdAt']) &&
+                       incoming().keys().hasOnly(['senderId', 'senderName', 'senderRole', 'channel', 'participants', 'courseTag', 'text', 'attachmentBase64', 'createdAt']) &&
+                       isValidChatMessage(incoming());
+      allow update: if false;
+      allow delete: if isSignedIn() && isValidId(messageId) && existing().senderId == request.auth.uid;
+    }
+  }
+}
